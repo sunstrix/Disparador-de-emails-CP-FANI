@@ -1,44 +1,30 @@
-# ==============================================================================
-# AMBIENTE VIRTUAL E DEPENDÊNCIAS
-# ==============================================================================
-venv/
-env/
-.venv/
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
+*.so
+.Python
+venv/
+ENV/
+env/
 
-# ==============================================================================
-# DADOS SENSÍVEIS E LGPD (NUNCA COMMITAR)
-# ==============================================================================
-# Planilhas e bases de contato
-*.xlsx
-*.csv
-INA5.xlsx
-
-# Logs de disparo e estado da aplicação
-logs/
+# Dados graváveis do usuário (NÃO versionar)
 app_state.json
+logs/
+templates/
+updater.log
+crash.log
 
-# Credenciais e configurações locais
-.env
-config_local.json
-*.keyring
-
-# ==============================================================================
-# IDE, EDITORES E SISTEMA OPERACIONAL
-# ==============================================================================
+# IDE
 .vscode/
 .idea/
 *.swp
 *.swo
-*~
+
+# OS
 .DS_Store
 Thumbs.db
 
-# ==============================================================================
-# BUILD E EMPACOTAMENTO FUTURO (PyInstaller)
-# ==============================================================================
-build/
-dist/
-*.spec
+# Permitir pastas vazias de recursos (o .gitkeep dentro delas será versionado)
+!logo/.gitkeep
+!ico/.gitkeep

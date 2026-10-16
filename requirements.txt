@@ -1,13 +1,4 @@
-# ==============================================================================
-# DEPENDÊNCIAS DO PROJETO - DISPARADOR DE E-MAILS CP FANI
-# ==============================================================================
-
-# Interface Gráfica (Rich Text, Tabelas, Threads)
-PySide6>=6.5.0
-
-# Processamento de Dados e Leitura de Planilhas
-pandas>=2.0.0
-openpyxl>=3.1.0
-
-# Armazenamento Seguro de Credenciais (Cofre do Sistema Operacional)
-keyring>=24.0.0
+PySide6>=6.5.0,<7.0.0
+pandas>=2.0.0,<3.0.0
+openpyxl>=3.1.0,<4.0.0
+keyring>=24.0.0,<25.0.0
