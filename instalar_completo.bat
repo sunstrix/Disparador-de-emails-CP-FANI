@@ -64,6 +64,11 @@ if %errorlevel% neq 0 (
     )
     set "PATH=C:\Python312;%PATH%"
 )
+
+:: Atualiza explicitamente a variavel PATH no processo do CMD atual para garantir
+:: que o Python instalado (seja 3.11 ou 3.12, user ou machine) seja encontrado antes do VENV.
+set "PATH=%LOCALAPPDATA%\Programs\Python\Python312;%LOCALAPPDATA%\Programs\Python\Python312\Scripts;%LOCALAPPDATA%\Programs\Python\Python311;%LOCALAPPDATA%\Programs\Python\Python311\Scripts;%PATH%"
+
 python --version
 
 :: ==============================================================================
@@ -100,9 +105,10 @@ if exist "%INSTALL_DIR%\.git" (
 echo [4/6] Configurando ambiente virtual...
 cd /d "%INSTALL_DIR%"
 if not exist "venv" python -m venv venv
-call venv\Scripts\activate.bat
-python -m pip install --upgrade pip --quiet
-pip install -r requirements.txt --quiet
+
+:: Executa diretamente pelo executavel do VENV, evitando problemas de escopo do activate.bat
+"venv\Scripts\python.exe" -m pip install --upgrade pip --quiet
+"venv\Scripts\python.exe" -m pip install -r requirements.txt --quiet
 if %errorlevel% neq 0 (
     echo Falha ao instalar dependencias. Verifique sua conexao.
     pause
@@ -123,7 +129,8 @@ echo [6/6] Criando atalho na area de trabalho...
 set "DESKTOP_PUBLIC=C:\Users\Public\Desktop"
 if not exist "%DESKTOP_PUBLIC%" set "DESKTOP_PUBLIC=%PUBLIC%\Desktop"
 
-powershell -Command "$WshShell = New-Object -ComObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%DESKTOP_PUBLIC%\Disparador de E-mails CP Fani.lnk'); $Shortcut.TargetPath = '%INSTALL_DIR%\executar.bat'; $Shortcut.WorkingDirectory = '%INSTALL_DIR%'; $Shortcut.IconLocation = '%INSTALL_DIR%\ico\icone.ico,0'; $Shortcut.WindowStyle = 7; $Shortcut.Save()"
+:: Aponta para pythonw.exe para executar como interface grafica pura (sem janela de console)
+powershell -Command "$WshShell = New-Object -ComObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%DESKTOP_PUBLIC%\Disparador de E-mails CP Fani.lnk'); $Shortcut.TargetPath = '%INSTALL_DIR%\venv\Scripts\pythonw.exe'; $Shortcut.Arguments = 'main.py'; $Shortcut.WorkingDirectory = '%INSTALL_DIR%'; $Shortcut.IconLocation = '%INSTALL_DIR%\ico\icone.ico,0'; $Shortcut.WindowStyle = 7; $Shortcut.Save()"
 
 echo.
 echo ============================================================
@@ -135,7 +142,7 @@ echo.
 
 if "%UPDATE_MODE%"=="1" (
     echo Reiniciando o aplicativo...
-    start "" "%INSTALL_DIR%\executar.bat"
+    start "" "%INSTALL_DIR%\venv\Scripts\pythonw.exe" "main.py"
 ) else (
     pause
 )
