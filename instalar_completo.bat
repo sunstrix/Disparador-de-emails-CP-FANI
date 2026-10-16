@@ -70,62 +70,28 @@ python --version
 :: 3. CLONAR OU ATUALIZAR PROJETO
 :: ==============================================================================
 echo [3/6] Preparando pasta do projeto...
+if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
 
-:: Verificar se a pasta existe
-if exist "%INSTALL_DIR%" (
-    :: Verificar se é um repositório git válido
+if exist "%INSTALL_DIR%\.git" (
+    echo Atualizando repositorio existente...
     cd /d "%INSTALL_DIR%"
-    git rev-parse --git-dir >nul 2>&1
-    if %errorlevel% equ 0 (
-        :: É um repositório git válido - atualizar
-        echo Atualizando repositorio existente...
-        git fetch origin
-        git reset --hard origin/main
-    ) else (
-        :: Pasta existe mas não é repositório git - fazer backup e recriar
-        echo Pasta existe mas nao e repositorio git. Recriando...
-        
-        :: Backup do venv se existir
-        if exist "%INSTALL_DIR%\venv" (
-            echo Preservando ambiente virtual...
-            if exist "%TEMP%\cpfani_venv_backup" rmdir /s /q "%TEMP%\cpfani_venv_backup" >nul 2>&1
-            xcopy "%INSTALL_DIR%\venv" "%TEMP%\cpfani_venv_backup\" /E /I /H /Y >nul
-        )
-        
-        :: Ajustar permissões da pasta existente para permitir remoção
-        echo Ajustando permissoes da pasta existente...
-        takeown /f "%INSTALL_DIR%" /r /d y >nul 2>&1
-        icacls "%INSTALL_DIR%" /grant "%USERNAME%:(OI)(CI)F" /T /Q >nul 2>&1
-        
-        :: Remover pasta existente
-        rmdir /s /q "%INSTALL_DIR%" 2>nul
-        if exist "%INSTALL_DIR%" (
-            echo ERRO: Falha ao remover pasta existente. Verifique se há arquivos em uso.
-            pause
-            exit /b 1
-        )
-        
-        :: Criar pasta vazia
-        mkdir "%INSTALL_DIR%"
-        
-        :: Clonar repositório
-        echo Clonando repositorio...
-        cd /d "%INSTALL_DIR%"
-        git clone --depth 1 https://github.com/sunstrix/Disparador-de-emails-CP-FANI.git .
-        
-        :: Restaurar venv se existia
-        if exist "%TEMP%\cpfani_venv_backup" (
-            echo Restaurando ambiente virtual...
-            xcopy "%TEMP%\cpfani_venv_backup" "%INSTALL_DIR%\venv\" /E /I /H /Y >nul
-            rmdir /s /q "%TEMP%\cpfani_venv_backup"
-        )
-    )
+    git fetch origin
+    git reset --hard origin/main
 ) else (
-    :: Pasta não existe - criar e clonar
-    echo Criando pasta e clonando repositorio...
+    echo Clonando repositorio...
+    if exist "%INSTALL_DIR%\venv" (
+        echo Preservando ambiente virtual...
+        xcopy "%INSTALL_DIR%\venv" "%TEMP%\cpfani_venv_backup\" /E /I /H /Y >nul
+    )
+    rmdir /s /q "%INSTALL_DIR%" 2>nul
     mkdir "%INSTALL_DIR%"
     cd /d "%INSTALL_DIR%"
     git clone --depth 1 https://github.com/sunstrix/Disparador-de-emails-CP-FANI.git .
+    if exist "%TEMP%\cpfani_venv_backup" (
+        echo Restaurando ambiente virtual...
+        xcopy "%TEMP%\cpfani_venv_backup" "%INSTALL_DIR%\venv\" /E /I /H /Y >nul
+        rmdir /s /q "%TEMP%\cpfani_venv_backup"
+    )
 )
 
 :: ==============================================================================
@@ -133,16 +99,7 @@ if exist "%INSTALL_DIR%" (
 :: ==============================================================================
 echo [4/6] Configurando ambiente virtual...
 cd /d "%INSTALL_DIR%"
-
-:: Ajustar permissões da pasta para permitir escrita (necessário se veio de instalação anterior)
-echo Ajustando permissoes para instalacao...
-takeown /f "%INSTALL_DIR%" /r /d y >nul 2>&1
-icacls "%INSTALL_DIR%" /grant "%USERNAME%:(OI)(CI)F" /T /Q >nul 2>&1
-
-:: Criar venv se não existir
 if not exist "venv" python -m venv venv
-
-:: Ativar e instalar dependências
 call venv\Scripts\activate.bat
 python -m pip install --upgrade pip --quiet
 pip install -r requirements.txt --quiet
