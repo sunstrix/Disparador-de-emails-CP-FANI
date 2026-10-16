@@ -35,9 +35,9 @@ def auto_detect_columns(df: pd.DataFrame) -> Dict[str, str]:
     """
     detected = {}
     target_mapping = {
-        'codigo': ['codigo', 'codigorevendedor', 'cod_revendedor', 'id', 'codigo_revendedor'],
-        'nome': ['nome', 'nome_completo', 'revendedor'],
-        'email': ['email', 'e-mail', 'mail', 'e_mail']
+        'codigo': ['codigo', 'codigorevendedor', 'cod_revendedor', 'id', 'codigo_revendedor', 'cod'],
+        'nome': ['nome', 'nome_completo', 'revendedor', 'nome_revendedor'],
+        'email': ['email', 'e-mail', 'mail', 'e_mail', 'email_contato']
     }
 
     # Normaliza os cabeçalhos do DataFrame para busca insensível a acentos/maiúsculas
@@ -138,12 +138,33 @@ def load_contacts(file_path: str, sheet_name: str = None) -> Tuple[pd.DataFrame,
 
     try:
         if file_path.lower().endswith('.csv'):
-            # Tenta ler com utf-8, fallback para latin1 (comum em CSVs do Excel BR)
-            try:
-                df = pd.read_csv(file_path, dtype=str, encoding='utf-8')
-            except UnicodeDecodeError:
-                df = pd.read_csv(file_path, dtype=str, encoding='latin1')
-        elif file_path.lower().endswith(('.xlsx', '.xls')):
+            # P1-3: CSV brasileiro com ";" - usa sep=None e engine='python' para detecção automática
+            # Tenta múltiplos encodings comuns no Brasil
+            df = None
+            encodings = ['utf-8', 'cp1252', 'latin1', 'iso-8859-1']
+            
+            for encoding in encodings:
+                try:
+                    df = pd.read_csv(
+                        file_path, 
+                        dtype=str, 
+                        encoding=encoding,
+                        sep=None,  # Detecção automática do separador
+                        engine='python'  # Necessário para sep=None
+                    )
+                    # Se conseguiu ler e tem mais de uma coluna, o encoding está correto
+                    if len(df.columns) > 1:
+                        break
+                except UnicodeDecodeError:
+                    continue
+                except Exception:
+                    continue
+            
+            if df is None or len(df.columns) == 0:
+                result['error_message'] = "Não foi possível ler o arquivo CSV. Verifique o encoding e o formato."
+                return None, result
+                
+        elif file_path.lower().endswith('.xlsx'):
             # Obter lista de abas
             xls = pd.ExcelFile(file_path)
             result['available_sheets'] = xls.sheet_names
@@ -151,8 +172,19 @@ def load_contacts(file_path: str, sheet_name: str = None) -> Tuple[pd.DataFrame,
             # Se não for especificada, pega a primeira aba por padrão
             target_sheet = sheet_name if sheet_name in result['available_sheets'] else result['available_sheets'][0]
             df = pd.read_excel(xls, sheet_name=target_sheet, dtype=str)
+            
+        elif file_path.lower().endswith('.xls'):
+            # P1-3: .xls antigo exige xlrd - orientar o usuário a converter para .xlsx
+            result['error_message'] = "Arquivos .xls (Excel 97-2003) não são suportados. Por favor, converta para .xlsx no Excel e tente novamente."
+            return None, result
+            
         else:
             result['error_message'] = "Formato de arquivo não suportado. Use .xlsx ou .csv"
+            return None, result
+
+        # Verificar se o DataFrame está vazio
+        if df.empty:
+            result['error_message'] = "O arquivo está vazio ou não contém dados válidos."
             return None, result
 
         # Auto-detectar colunas
@@ -166,6 +198,12 @@ def load_contacts(file_path: str, sheet_name: str = None) -> Tuple[pd.DataFrame,
         result['success'] = True
         return df, result
 
+    except pd.errors.EmptyDataError:
+        result['error_message'] = "O arquivo está vazio."
+        return None, result
+    except pd.errors.ParserError as e:
+        result['error_message'] = f"Erro ao processar o arquivo: {str(e)}"
+        return None, result
     except Exception as e:
         result['error_message'] = f"Erro ao ler o arquivo: {str(e)}"
         return None, result
