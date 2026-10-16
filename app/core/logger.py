@@ -12,7 +12,7 @@ from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
 from email.header import Header
-from email.utils import formataddr
+from email.utils import formataddr, formatdate, make_msgid
 
 from app.config import LOGS_DIR, REPORT_EMAIL
 from app.core.smtp_client import SMTPClient
@@ -59,6 +59,8 @@ class CampaignLogger:
     def send_final_report(self, summary: dict, smtp_config: dict):
         """
         Envia o e-mail de relatório final para o TI com o CSV em anexo.
+        Utiliza a conexão SMTP reutilizável (connect/close) e adiciona cabeçalhos RFC.
+        Este método é seguro para ser chamado de uma thread separada (P0-9).
         """
         end_time = datetime.now()
         
@@ -89,6 +91,11 @@ class CampaignLogger:
         msg["To"] = REPORT_EMAIL
         msg["Subject"] = Header(subject, "utf-8")
         
+        # Cabeçalhos RFC (P1-6)
+        msg["Date"] = formatdate(localtime=True)
+        domain = smtp_config.get("email", "").split('@')[1] if '@' in smtp_config.get("email", "") else "cp-fani.local"
+        msg["Message-ID"] = make_msgid(domain=domain)
+        
         msg.attach(MIMEText(body_text, "plain", "utf-8"))
         
         # Anexa o arquivo CSV
@@ -104,7 +111,8 @@ class CampaignLogger:
             )
             msg.attach(part)
             
-        # Envia o e-mail
+        # Envia o e-mail usando a conexão reutilizável (P0-4)
+        client = None
         try:
             client = SMTPClient(
                 provider=smtp_config['provider'],
@@ -113,9 +121,18 @@ class CampaignLogger:
                 port=smtp_config['port'],
                 security=smtp_config['security']
             )
-            server = client._create_server()
-            server.send_message(msg)
-            server.quit()
+            # Conecta (reutiliza se já estiver conectado, senão cria nova conexão)
+            success, msg_conn = client.connect()
+            if not success:
+                return False, f"Falha ao conectar para enviar relatório: {msg_conn}"
+            
+            # Envia a mensagem
+            client.server.send_message(msg)
+            
             return True, "Relatório enviado com sucesso."
         except Exception as e:
             return False, f"Falha ao enviar relatório: {str(e)}"
+        finally:
+            # Fecha a conexão de forma segura
+            if client:
+                client.close()
