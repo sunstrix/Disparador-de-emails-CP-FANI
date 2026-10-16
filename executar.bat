@@ -3,23 +3,50 @@ chcp 65001 >nul
 title Disparador de E-mails CP Fani
 color 0B
 
-REM Navegar para o diretório onde este script está localizado
-cd /d "%~dp0"
-
 echo.
 echo ============================================================
 echo   DISPARADOR DE E-MAILS CP FANI
 echo ============================================================
 echo.
 
-REM Verificar se o ambiente virtual existe
-if not exist "venv\" (
-    echo ERRO: Ambiente virtual nao encontrado!
+REM Navegar para o diretorio onde este script esta localizado
+echo [DEBUG] Diretorio atual: %CD%
+echo [DEBUG] Diretorio do script: %~dp0
+cd /d "%~dp0"
+echo [DEBUG] Novo diretorio atual: %CD%
+echo.
+
+REM Verificar se o arquivo main.py existe
+if not exist "main.py" (
+    echo ERRO: Arquivo main.py nao encontrado!
     echo.
-    echo Execute primeiro o arquivo: instalar.bat
+    echo Diretorio atual: %CD%
+    echo.
+    echo Verifique se voce esta executando este script na pasta correta.
+    echo A pasta deve conter: main.py, app\, requirements.txt
     echo.
     pause
     exit /b 1
+)
+echo Arquivo main.py encontrado!
+echo.
+
+REM Verificar se o ambiente virtual existe
+if not exist "venv\Scripts\activate.bat" (
+    echo Ambiente virtual nao encontrado!
+    echo Criando ambiente virtual automaticamente...
+    echo.
+    python -m venv venv
+    if errorlevel 1 (
+        echo ERRO: Falha ao criar ambiente virtual!
+        echo Verifique se o Python esta instalado corretamente.
+        pause
+        exit /b 1
+    )
+    echo Ambiente virtual criado com sucesso!
+    echo.
+) else (
+    echo Ambiente virtual encontrado!
 )
 
 REM Ativar ambiente virtual
@@ -32,16 +59,6 @@ if errorlevel 1 (
 )
 echo Ambiente virtual ativado!
 echo.
-
-REM Verificar se o arquivo principal existe
-if not exist "main.py" (
-    echo ERRO: Arquivo main.py nao encontrado!
-    echo.
-    echo Verifique se voce esta executando este script na pasta correta.
-    echo.
-    pause
-    exit /b 1
-)
 
 echo Iniciando o aplicativo...
 echo.
