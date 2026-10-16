@@ -1,0 +1,44 @@
+# ==============================================================================
+# AMBIENTE VIRTUAL E DEPENDÊNCIAS
+# ==============================================================================
+venv/
+env/
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# ==============================================================================
+# DADOS SENSÍVEIS E LGPD (NUNCA COMMITAR)
+# ==============================================================================
+# Planilhas e bases de contato
+*.xlsx
+*.csv
+INA5.xlsx
+
+# Logs de disparo e estado da aplicação
+logs/
+app_state.json
+
+# Credenciais e configurações locais
+.env
+config_local.json
+*.keyring
+
+# ==============================================================================
+# IDE, EDITORES E SISTEMA OPERACIONAL
+# ==============================================================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ==============================================================================
+# BUILD E EMPACOTAMENTO FUTURO (PyInstaller)
+# ==============================================================================
+build/
+dist/
+*.spec
