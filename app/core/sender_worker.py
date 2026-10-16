@@ -8,8 +8,9 @@ import json
 import os
 import time
 import random
-from datetime import datetime
-from typing import List, Dict, Any
+import hashlib
+from datetime import datetime, timedelta
+from typing import List, Dict, Any, Optional
 
 from PySide6.QtCore import QThread, Signal
 
@@ -24,13 +25,24 @@ from app.core.template_engine import render_template
 
 class SenderWorker(QThread):
     # Sinais para comunicação segura com a Interface Gráfica (UI)
-    progress_updated = Signal(int, int, int)  # (enviados, falhas, restantes)
+    progress_updated = Signal(int, int, int, float)  # (enviados, falhas, restantes, tempo_estimado_segundos)
     log_updated = Signal(dict)                # Registro de log individual para o CSV e UI
     status_changed = Signal(str)              # Status atual do processo
     finished_sending = Signal(dict)           # Resumo final para o relatório
     error_occurred = Signal(str)              # Erros críticos do sistema
+    state_mismatch = Signal(str)              # Sinaliza quando o estado carregado não bate com a campanha atual
 
-    def __init__(self, contacts: List[Dict[str, Any]], subject: str, html_body: str, text_body: str, smtp_config: Dict[str, Any]):
+    def __init__(
+        self, 
+        contacts: List[Dict[str, Any]], 
+        subject: str, 
+        html_body: str, 
+        text_body: str, 
+        smtp_config: Dict[str, Any],
+        daily_limit: int = MAX_DAILY_LIMIT,
+        min_interval: int = MIN_INTERVAL_SECONDS,
+        max_interval: int = MAX_INTERVAL_SECONDS
+    ):
         super().__init__()
         self.contacts = contacts
         self.subject = subject
@@ -38,18 +50,51 @@ class SenderWorker(QThread):
         self.text_body = text_body
         self.smtp_config = smtp_config
         
+        # Limites configuráveis pela UI (P0-1)
+        self.daily_limit = min(daily_limit, MAX_DAILY_LIMIT)  # Respeita o teto absoluto
+        self.min_interval = max(1, min_interval)
+        self.max_interval = max(self.min_interval, max_interval)
+        
         # Flags de controle de execução
         self._is_paused = False
         self._is_stopped = False
         
+        # Gera a assinatura da campanha atual (P0-5)
+        self.campaign_signature = self._generate_campaign_signature()
+        
         # Carrega o estado persistente (limite diário e índice de retomada)
         self.state = self._load_state()
         
+        # Contadores separados para esta execução (P1-4)
+        self.execution_sent = 0
+        self.execution_failed = 0
+        self.start_time: Optional[datetime] = None
+
+    def _generate_campaign_signature(self) -> str:
+        """
+        Gera um hash único baseado na lista de e-mails e na conta remetente.
+        Usado para detectar se a campanha mudou e invalidar o estado de retomada.
+        """
+        # Concatena todos os e-mails em ordem
+        emails_str = "|".join(c.get("EMail", "").strip().lower() for c in self.contacts)
+        account = self.smtp_config.get("email", "").strip().lower()
+        
+        # Cria um hash SHA256
+        signature_data = f"{account}:{emails_str}"
+        return hashlib.sha256(signature_data.encode('utf-8')).hexdigest()[:16]
+
     def _load_state(self) -> Dict[str, Any]:
-        """Carrega o estado do último envio do arquivo JSON. Reseta o contador se mudou o dia."""
+        """
+        Carrega o estado do último envio do arquivo JSON.
+        Reseta o contador se mudou o dia ou se a campanha/conta mudou (P0-5).
+        """
         today = datetime.now().strftime("%Y-%m-%d")
+        current_account = self.smtp_config.get("email", "").strip().lower()
+        
         default_state = {
             "last_date": today,
+            "account": current_account,
+            "campaign_signature": self.campaign_signature,
             "sent_today": 0,
             "last_index": 0,
             "sent_emails": []
@@ -59,14 +104,28 @@ class SenderWorker(QThread):
             try:
                 with open(APP_STATE_FILE, 'r', encoding='utf-8') as f:
                     state = json.load(f)
-                    # Se mudou o dia, reseta o contador diário e a lista de enviados do dia
+                    
+                    # Verifica se mudou o dia
                     if state.get("last_date") != today:
                         state["sent_today"] = 0
                         state["last_date"] = today
                         state["sent_emails"] = []
+                        state["last_index"] = 0
+                    
+                    # Verifica se a conta ou a campanha mudou (P0-5)
+                    if (state.get("account") != current_account or 
+                        state.get("campaign_signature") != self.campaign_signature):
+                        # Sinaliza para a UI perguntar ao usuário
+                        self.state_mismatch.emit("Campanha ou conta diferente da última execução")
+                        # Por padrão, reseta para evitar pular contatos
+                        state["last_index"] = 0
+                        state["sent_emails"] = []
+                        state["campaign_signature"] = self.campaign_signature
+                        state["account"] = current_account
+                    
                     return state
             except Exception:
-                pass # Se o arquivo estiver corrompido, usa o padrão
+                pass  # Se o arquivo estiver corrompido, usa o padrão
                 
         return default_state
 
@@ -77,6 +136,13 @@ class SenderWorker(QThread):
                 json.dump(self.state, f, ensure_ascii=False, indent=4)
         except Exception as e:
             self.error_occurred.emit(f"Erro ao salvar estado de envio: {str(e)}")
+
+    def reset_progress(self):
+        """Reinicia o progresso de envio (chamado pela UI ao clicar em 'Reiniciar')."""
+        self.state["last_index"] = 0
+        self.state["sent_emails"] = []
+        self._save_state()
+        self.status_changed.emit("Progresso reiniciado")
 
     def pause(self):
         """Pausa o loop de envio."""
@@ -93,118 +159,171 @@ class SenderWorker(QThread):
         self._is_stopped = True
         self.status_changed.emit("Parando envio...")
 
+    def _interruptible_sleep(self, seconds: int):
+        """
+        Aguarda o tempo especificado, mas verifica as flags de pausa/parada
+        a cada 0.5 segundos (P0-11). Retorna True se foi interrompido.
+        """
+        elapsed = 0.0
+        while elapsed < seconds:
+            if self._is_stopped or self._is_paused:
+                return True
+            time.sleep(0.5)
+            elapsed += 0.5
+        return False
+
     def run(self):
         """Método principal executado na thread. Orquestra o envio."""
-        self.status_changed.emit("Iniciando conexão SMTP...")
-        
-        # 1. Inicializar cliente SMTP
         try:
-            client = SMTPClient(
-                provider=self.smtp_config['provider'],
-                email=self.smtp_config['email'],
-                password=self.smtp_config['password'],
-                port=self.smtp_config['port'],
-                security=self.smtp_config['security']
-            )
-        except Exception as e:
-            self.error_occurred.emit(f"Falha ao configurar SMTP: {str(e)}")
-            return
+            self.status_changed.emit("Iniciando conexão SMTP...")
+            
+            # 1. Inicializar cliente SMTP
+            try:
+                client = SMTPClient(
+                    provider=self.smtp_config['provider'],
+                    email=self.smtp_config['email'],
+                    password=self.smtp_config['password'],
+                    port=self.smtp_config['port'],
+                    security=self.smtp_config['security']
+                )
+                # Conecta uma vez e reutiliza a conexão (P0-4 já implementado no SMTPClient)
+                success, msg = client.connect()
+                if not success:
+                    raise Exception(f"Falha ao conectar: {msg}")
+            except Exception as e:
+                self.error_occurred.emit(f"Falha ao configurar SMTP: {str(e)}")
+                return  # finally garantirá que finished_sending seja emitido
 
-        sent_count = self.state["sent_today"]
-        failed_count = 0
-        total_contacts = len(self.contacts)
-        start_index = self.state["last_index"]
-        start_time = datetime.now()
-        
-        # 2. Loop de envio
-        for i in range(start_index, total_contacts):
-            # Verifica se foi solicitado para parar
-            if self._is_stopped:
-                break
-                
-            # Loop de pausa (aguarda até ser retomado ou parado)
-            while self._is_paused:
-                time.sleep(1)
+            sent_count = self.state["sent_today"]
+            failed_count = 0
+            total_contacts = len(self.contacts)
+            start_index = self.state["last_index"]
+            self.start_time = datetime.now()
+            
+            # 2. Loop de envio
+            for i in range(start_index, total_contacts):
+                # Verifica se foi solicitado para parar
                 if self._is_stopped:
                     break
                     
-            if self._is_stopped:
-                break
+                # Loop de pausa (aguarda até ser retomado ou parado)
+                while self._is_paused:
+                    time.sleep(0.5)
+                    if self._is_stopped:
+                        break
+                        
+                if self._is_stopped:
+                    break
+                    
+                # 3. Verificar limite diário configurável (P0-1)
+                if sent_count >= self.daily_limit:
+                    msg = f"Limite diário de {self.daily_limit} e-mails atingido."
+                    self.status_changed.emit(msg)
+                    self.error_occurred.emit(msg)
+                    break
+
+                contact = self.contacts[i]
+                email = contact.get("EMail", "").strip().lower()
+                codigo = contact.get("CodigoRevendedor", "")
+                nome = contact.get("Nome", "")
                 
-            # 3. Verificar limite diário rígido (200 e-mails)
-            if sent_count >= MAX_DAILY_LIMIT:
-                msg = f"Limite diário de {MAX_DAILY_LIMIT} e-mails atingido."
-                self.status_changed.emit(msg)
-                self.error_occurred.emit(msg)
-                break
+                # 4. Verificar se já foi enviado hoje (evita reenvio na retomada)
+                if email in self.state["sent_emails"]:
+                    continue
 
-            contact = self.contacts[i]
-            email = contact.get("EMail", "").strip().lower()
-            codigo = contact.get("CodigoRevendedor", "")
-            nome = contact.get("Nome", "")
-            
-            # 4. Verificar se já foi enviado hoje (evita reenvio na retomada)
-            if email in self.state["sent_emails"]:
-                continue
+                # 5. Renderizar templates (assunto, HTML, texto)
+                try:
+                    rendered_subject = render_template(self.subject, contact)
+                    rendered_html = render_template(self.html_body, contact)
+                    rendered_text = render_template(self.text_body, contact)
+                except Exception as e:
+                    self._emit_log(codigo, email, nome, "FALHA", f"Erro no template: {str(e)}")
+                    failed_count += 1
+                    self.execution_failed += 1
+                    self._update_progress(i, total_contacts, sent_count, failed_count)
+                    continue
 
-            # 5. Renderizar templates (assunto, HTML, texto)
-            try:
-                rendered_subject = render_template(self.subject, contact)
-                rendered_html = render_template(self.html_body, contact)
-                rendered_text = render_template(self.text_body, contact)
-            except Exception as e:
-                self._emit_log(codigo, email, nome, "FALHA", f"Erro no template: {str(e)}")
-                failed_count += 1
+                # 6. Enviar e-mail via SMTP
+                self.status_changed.emit(f"Enviando para {email} ({i+1}/{total_contacts})...")
+                success, message = client.send_email(
+                    to_email=email,
+                    to_name=nome,
+                    subject=rendered_subject,
+                    html_body=rendered_html,
+                    text_body=rendered_text
+                )
+
+                # 7. Registrar log e atualizar contadores
+                status = "ENVIADO" if success else "FALHA"
+                self._emit_log(codigo, email, nome, status, "" if success else message)
+
+                if success:
+                    sent_count += 1
+                    self.execution_sent += 1
+                    self.state["sent_emails"].append(email)
+                else:
+                    failed_count += 1
+                    self.execution_failed += 1
+
+                # 8. Persistir estado (índice e contador)
+                self.state["sent_today"] = sent_count
+                self.state["last_index"] = i + 1
+                self._save_state()
+
+                # 9. Atualizar Interface Gráfica
                 self._update_progress(i, total_contacts, sent_count, failed_count)
-                continue
 
-            # 6. Enviar e-mail via SMTP
-            self.status_changed.emit(f"Enviando para {email} ({i+1}/{total_contacts})...")
-            success, message = client.send_email(
-                to_email=email,
-                to_name=nome,
-                subject=rendered_subject,
-                html_body=rendered_html,
-                text_body=rendered_text
-            )
+                # 10. Intervalo aleatório entre envios (anti-spam) - interruptível (P0-11)
+                if i < total_contacts - 1 and not self._is_stopped:
+                    sleep_time = random.randint(self.min_interval, self.max_interval)
+                    self.status_changed.emit(f"Aguardando {sleep_time}s para o próximo envio...")
+                    if self._interruptible_sleep(sleep_time):
+                        # Foi interrompido (pausa ou parada)
+                        if self._is_paused:
+                            # Volta para o início do loop para aguardar a retomada
+                            continue
+                        else:
+                            # Foi parado
+                            break
 
-            # 7. Registrar log e atualizar contadores
-            status = "ENVIADO" if success else "FALHA"
-            self._emit_log(codigo, email, nome, status, "" if success else message)
-
-            if success:
-                sent_count += 1
-                self.state["sent_emails"].append(email)
-            else:
-                failed_count += 1
-
-            # 8. Persistir estado (índice e contador)
-            self.state["sent_today"] = sent_count
-            self.state["last_index"] = i + 1
-            self._save_state()
-
-            # 9. Atualizar Interface Gráfica
-            self._update_progress(i, total_contacts, sent_count, failed_count)
-
-            # 10. Intervalo aleatório entre envios (anti-spam)
-            if i < total_contacts - 1 and not self._is_stopped:
-                sleep_time = random.randint(MIN_INTERVAL_SECONDS, MAX_INTERVAL_SECONDS)
-                self.status_changed.emit(f"Aguardando {sleep_time}s para o próximo envio...")
-                time.sleep(sleep_time)
-
-        # 11. Finalização e resumo
-        end_time = datetime.now()
-        summary = {
-            "start_time": start_time.strftime("%Y-%m-%d %H:%M:%S"),
-            "end_time": end_time.strftime("%Y-%m-%d %H:%M:%S"),
-            "total": total_contacts,
-            "sent": sent_count,
-            "failed": failed_count,
-            "remaining": total_contacts - self.state["last_index"]
-        }
-        
-        self.finished_sending.emit(summary)
-        self.status_changed.emit("Processo finalizado")
+            # 11. Finalização e resumo
+            end_time = datetime.now()
+            summary = {
+                "start_time": self.start_time.strftime("%Y-%m-%d %H:%M:%S") if self.start_time else "N/A",
+                "end_time": end_time.strftime("%Y-%m-%d %H:%M:%S"),
+                "total": total_contacts,
+                "sent": sent_count,
+                "failed": failed_count,
+                "remaining": total_contacts - self.state["last_index"],
+                "execution_sent": self.execution_sent,
+                "execution_failed": self.execution_failed
+            }
+            
+            self.finished_sending.emit(summary)
+            self.status_changed.emit("Processo finalizado")
+            
+            # Fecha a conexão SMTP de forma segura
+            client.close()
+            
+        except Exception as e:
+            # Captura qualquer exceção não tratada no loop principal
+            self.error_occurred.emit(f"Erro crítico no worker: {str(e)}")
+        finally:
+            # Garante que finished_sending sempre seja emitido (P0-7)
+            # Se ainda não foi emitido (ex: exceção antes do resumo), emite um resumo de erro
+            if not hasattr(self, '_finished_emitted') or not self._finished_emitted:
+                error_summary = {
+                    "start_time": self.start_time.strftime("%Y-%m-%d %H:%M:%S") if self.start_time else "N/A",
+                    "end_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "total": len(self.contacts),
+                    "sent": self.execution_sent,
+                    "failed": self.execution_failed,
+                    "remaining": len(self.contacts) - self.state["last_index"],
+                    "execution_sent": self.execution_sent,
+                    "execution_failed": self.execution_failed,
+                    "error": True
+                }
+                self.finished_sending.emit(error_summary)
 
     def _emit_log(self, codigo: str, email: str, nome: str, status: str, erro: str):
         """Emite o sinal de log formatado."""
@@ -218,6 +337,15 @@ class SenderWorker(QThread):
         })
 
     def _update_progress(self, current_index: int, total: int, sent: int, failed: int):
-        """Emite o sinal de progresso formatado."""
+        """Emite o sinal de progresso formatado com estimativa de tempo (P1-4)."""
         remaining = total - (current_index + 1)
-        self.progress_updated.emit(sent, failed, remaining)
+        
+        # Calcula tempo estimado restante
+        estimated_time = 0.0
+        if self.start_time and (self.execution_sent + self.execution_failed) > 0:
+            elapsed = (datetime.now() - self.start_time).total_seconds()
+            processed = self.execution_sent + self.execution_failed
+            avg_time_per_email = elapsed / processed
+            estimated_time = avg_time_per_email * remaining
+        
+        self.progress_updated.emit(sent, failed, remaining, estimated_time)
