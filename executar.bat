@@ -10,17 +10,11 @@ echo ============================================================
 echo.
 
 REM Navegar para o diretorio onde este script esta localizado
-echo [DEBUG] Diretorio atual: %CD%
-echo [DEBUG] Diretorio do script: %~dp0
 cd /d "%~dp0"
-echo [DEBUG] Novo diretorio atual: %CD%
-echo.
 
 REM Verificar se o arquivo main.py existe
 if not exist "main.py" (
     echo ERRO: Arquivo main.py nao encontrado!
-    echo.
-    echo Diretorio atual: %CD%
     echo.
     echo Verifique se voce esta executando este script na pasta correta.
     echo A pasta deve conter: main.py, app\, requirements.txt
@@ -32,7 +26,7 @@ echo Arquivo main.py encontrado!
 echo.
 
 REM Verificar se o ambiente virtual existe
-if not exist "venv\Scripts\activate.bat" (
+if not exist "venv\Scripts\python.exe" (
     echo Ambiente virtual nao encontrado!
     echo Criando ambiente virtual automaticamente...
     echo.
@@ -49,15 +43,44 @@ if not exist "venv\Scripts\activate.bat" (
     echo Ambiente virtual encontrado!
 )
 
-REM Ativar ambiente virtual
-echo Ativando ambiente virtual...
-call venv\Scripts\activate.bat
+REM Definir o caminho do Python do ambiente virtual
+set PYTHON=venv\Scripts\python.exe
+set PIP=venv\Scripts\pip.exe
+
+REM Verificar se o Python do venv funciona
+%PYTHON% --version >nul 2>&1
 if errorlevel 1 (
-    echo ERRO: Falha ao ativar ambiente virtual!
+    echo ERRO: Python do ambiente virtual nao esta funcionando!
+    echo Tente executar o arquivo instalar.bat para recriar o ambiente.
     pause
     exit /b 1
 )
-echo Ambiente virtual ativado!
+echo Python do ambiente virtual: 
+%PYTHON% --version
+echo.
+
+REM Verificar se as dependencias estao instaladas
+echo Verificando dependencias...
+%PYTHON% -c "import PySide6" >nul 2>&1
+if errorlevel 1 (
+    echo.
+    echo AVISO: Dependencias nao instaladas no ambiente virtual!
+    echo.
+    echo Instalando automaticamente...
+    echo.
+    %PIP% install -r requirements.txt
+    if errorlevel 1 (
+        echo.
+        echo ERRO: Falha ao instalar dependencias!
+        echo Tente executar o arquivo instalar.bat manualmente.
+        pause
+        exit /b 1
+    )
+    echo.
+    echo Dependencias instaladas com sucesso!
+) else (
+    echo Dependencias OK!
+)
 echo.
 
 echo Iniciando o aplicativo...
@@ -68,8 +91,8 @@ echo   ou pressionar Ctrl+C
 echo ============================================================
 echo.
 
-REM Executar o aplicativo
-python main.py
+REM Executar o aplicativo usando o Python do ambiente virtual
+%PYTHON% main.py
 
 REM Se o programa fechar com erro, manter a janela aberta
 if errorlevel 1 (
