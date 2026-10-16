@@ -5,8 +5,11 @@
 # e validação de campos antes do disparo, evitando vazamento de tags cruas.
 
 import re
+import html
 import unicodedata
 from typing import Dict, List, Any
+
+from app.config import FALLBACK_NOME
 
 def normalize_key(key: str) -> str:
     """
@@ -42,8 +45,6 @@ def extract_first_name(full_name: str, use_two_names: bool = False) -> str:
     selected_parts = parts[:count]
     
     # Capitaliza cada parte (ex: "MARIA" -> "Maria", "da" -> "Da")
-    # Para um tratamento mais refinado de preposições, poderíamos adicionar uma lista de exceções,
-    # mas o .capitalize() padrão atende ao requisito de "capitalização correta" básico.
     return " ".join(part.capitalize() for part in selected_parts)
 
 def format_full_name(full_name: str) -> str:
@@ -54,11 +55,17 @@ def format_full_name(full_name: str) -> str:
         return ""
     return full_name.strip().title()
 
-def render_template(text: str, row_data: Dict[str, Any], fallback: str = "Revendedor(a)") -> str:
+def render_template(
+    text: str, 
+    row_data: Dict[str, Any], 
+    fallback: str = FALLBACK_NOME,
+    use_two_names: bool = False
+) -> str:
     """
     Substitui todas as variáveis {{variavel}} no texto pelos valores da linha.
     Se a variável não existir ou estiver vazia, usa o fallback.
     NUNCA retorna a tag crua {{...}}.
+    Aplica html.escape nos valores para evitar quebra de HTML (P1-2).
     """
     if not text or not isinstance(text, str):
         return text
@@ -73,23 +80,24 @@ def render_template(text: str, row_data: Dict[str, Any], fallback: str = "Revend
         # Tratamento especial para primeiro_nome
         if var_key == "primeiro_nome":
             full_name = normalized_row.get("nome", "")
-            val = extract_first_name(full_name, use_two_names=False)
-            return val if val else fallback
+            val = extract_first_name(full_name, use_two_names=use_two_names)
+            return html.escape(val) if val else html.escape(fallback)
 
         # Tratamento especial para nome_completo
         if var_key == "nome_completo":
             full_name = normalized_row.get("nome", "")
             val = format_full_name(full_name)
-            return val if val else fallback
+            return html.escape(val) if val else html.escape(fallback)
 
         # Busca normal na planilha
         val = normalized_row.get(var_key, "")
         
         # Se estiver vazio ou for apenas a string 'nan' do pandas
         if not val or val.lower() == 'nan':
-            return fallback
+            return html.escape(fallback)
             
-        return val
+        # Escapa o valor para evitar injeção de HTML acidental (P1-2)
+        return html.escape(val)
 
     # Substitui todas as ocorrências de {{ ... }}
     return re.sub(r'\{\{\s*([\w\W]+?)\s*\}\}', replacer, text)
