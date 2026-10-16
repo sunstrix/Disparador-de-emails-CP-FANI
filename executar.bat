@@ -2,7 +2,6 @@
 chcp 65001 >nul
 title Disparador de E-mails CP Fani
 color 0B
-
 echo.
 echo ============================================================
 echo   DISPARADOR DE E-MAILS CP FANI
@@ -26,82 +25,73 @@ echo Arquivo main.py encontrado!
 echo.
 
 REM Verificar se o ambiente virtual existe
-if not exist "venv\Scripts\python.exe" (
-    echo Ambiente virtual nao encontrado!
-    echo Criando ambiente virtual automaticamente...
+if not exist "venv\Scripts\pythonw.exe" (
+    echo ERRO: Ambiente virtual nao encontrado!
     echo.
-    python -m venv venv
-    if errorlevel 1 (
-        echo ERRO: Falha ao criar ambiente virtual!
-        echo Verifique se o Python esta instalado corretamente.
-        pause
-        exit /b 1
-    )
-    echo Ambiente virtual criado com sucesso!
+    echo Execute o arquivo "instalar_completo.bat" como administrador
+    echo para instalar o aplicativo e suas dependencias.
     echo.
-) else (
-    echo Ambiente virtual encontrado!
-)
-
-REM Definir o caminho do Python do ambiente virtual
-set PYTHON=venv\Scripts\python.exe
-set PIP=venv\Scripts\pip.exe
-
-REM Verificar se o Python do venv funciona
-%PYTHON% --version >nul 2>&1
-if errorlevel 1 (
-    echo ERRO: Python do ambiente virtual nao esta funcionando!
-    echo Tente executar o arquivo instalar.bat para recriar o ambiente.
     pause
     exit /b 1
 )
-echo Python do ambiente virtual: 
-%PYTHON% --version
+echo Ambiente virtual encontrado!
 echo.
 
-REM Verificar se as dependencias estao instaladas
-echo Verificando dependencias...
-%PYTHON% -c "import PySide6" >nul 2>&1
+REM Definir o caminho do Python do ambiente virtual
+set PYTHONW=venv\Scripts\pythonw.exe
+
+REM Verificar se o Python do venv funciona
+%PYTHONW% --version >nul 2>&1
 if errorlevel 1 (
+    echo ERRO: Python do ambiente virtual nao esta funcionando!
     echo.
-    echo AVISO: Dependencias nao instaladas no ambiente virtual!
+    echo Execute o arquivo "instalar_completo.bat" como administrador
+    echo para reparar a instalacao.
     echo.
-    echo Instalando automaticamente...
-    echo.
-    %PIP% install -r requirements.txt
-    if errorlevel 1 (
-        echo.
-        echo ERRO: Falha ao instalar dependencias!
-        echo Tente executar o arquivo instalar.bat manualmente.
-        pause
-        exit /b 1
-    )
-    echo.
-    echo Dependencias instaladas com sucesso!
-) else (
-    echo Dependencias OK!
+    pause
+    exit /b 1
 )
+
+REM Verificar se as dependencias estao instaladas
+%PYTHONW% -c "import PySide6" >nul 2>&1
+if errorlevel 1 (
+    echo ERRO: Dependencias nao instaladas no ambiente virtual!
+    echo.
+    echo Execute o arquivo "instalar_completo.bat" como administrador
+    echo para instalar as dependencias necessarias.
+    echo.
+    pause
+    exit /b 1
+)
+echo Dependencias OK!
 echo.
 
 echo Iniciando o aplicativo...
 echo.
 echo ============================================================
-echo   Para fechar o aplicativo, basta fechar esta janela
-echo   ou pressionar Ctrl+C
+echo   O aplicativo sera iniciado em segundo plano.
+echo   Use o icone na bandeja do sistema (perto do relogio)
+echo   para controlar o envio.
 echo ============================================================
 echo.
 
-REM Executar o aplicativo usando o Python do ambiente virtual
-%PYTHON% main.py
+REM Executar o aplicativo usando pythonw.exe (sem console)
+start "" "%PYTHONW%" main.py
 
-REM Se o programa fechar com erro, manter a janela aberta
+REM Se o programa falhar ao iniciar, mostrar mensagem
+timeout /t 2 /nobreak >nul
+tasklist /FI "IMAGENAME eq pythonw.exe" /FI "WINDOWTITLE eq Disparador*" | find "pythonw.exe" >nul
 if errorlevel 1 (
     echo.
     echo ============================================================
-    echo   O aplicativo fechou com erro!
+    echo   O aplicativo pode ter falhado ao iniciar!
     echo ============================================================
     echo.
-    echo Codigo de erro: %errorlevel%
+    echo Verifique os logs em:
+    echo %LOCALAPPDATA%\CPFani\logs\
+    echo.
+    echo Se o problema persistir, execute o arquivo
+    echo "instalar_completo.bat" como administrador para reparar.
     echo.
     pause
 )
