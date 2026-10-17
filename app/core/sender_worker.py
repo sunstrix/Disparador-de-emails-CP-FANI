@@ -69,6 +69,7 @@ class SenderWorker(QThread):
         self.execution_sent = 0
         self.execution_failed = 0
         self.start_time: Optional[datetime] = None
+        self._finished_emitted = False
 
     def _generate_campaign_signature(self) -> str:
         """
@@ -157,19 +158,20 @@ class SenderWorker(QThread):
     def stop(self):
         """Solicita a parada definitiva do loop de envio."""
         self._is_stopped = True
+        self.requestInterruption()
         self.status_changed.emit("Parando envio...")
 
-    def _interruptible_sleep(self, seconds: int):
+    def _interruptible_sleep(self, seconds: float) -> bool:
         """
-        Aguarda o tempo especificado, mas verifica as flags de pausa/parada
-        a cada 0.5 segundos (P0-11). Retorna True se foi interrompido.
+        Aguarda o tempo especificado em frações de 100ms, verificando as flags
+        de pausa/parada e self.isInterruptionRequested() (P0-11).
+        Retorna True se foi interrompido.
         """
-        elapsed = 0.0
-        while elapsed < seconds:
-            if self._is_stopped or self._is_paused:
+        steps = int(seconds * 10)
+        for _ in range(steps):
+            if self._is_stopped or self._is_paused or self.isInterruptionRequested():
                 return True
-            time.sleep(0.5)
-            elapsed += 0.5
+            self.msleep(100)
         return False
 
     def run(self):
@@ -202,17 +204,17 @@ class SenderWorker(QThread):
             
             # 2. Loop de envio
             for i in range(start_index, total_contacts):
-                # Verifica se foi solicitado para parar
-                if self._is_stopped:
+                # Verifica se foi solicitado para parar ou interromper a thread
+                if self._is_stopped or self.isInterruptionRequested():
                     break
                     
                 # Loop de pausa (aguarda até ser retomado ou parado)
                 while self._is_paused:
-                    time.sleep(0.5)
-                    if self._is_stopped:
+                    self.msleep(200)
+                    if self._is_stopped or self.isInterruptionRequested():
                         break
                         
-                if self._is_stopped:
+                if self._is_stopped or self.isInterruptionRequested():
                     break
                     
                 # 3. Verificar limite diário configurável (P0-1)
@@ -274,7 +276,7 @@ class SenderWorker(QThread):
                 self._update_progress(i, total_contacts, sent_count, failed_count)
 
                 # 10. Intervalo aleatório entre envios (anti-spam) - interruptível (P0-11)
-                if i < total_contacts - 1 and not self._is_stopped:
+                if i < total_contacts - 1 and not self._is_stopped and not self.isInterruptionRequested():
                     sleep_time = random.randint(self.min_interval, self.max_interval)
                     self.status_changed.emit(f"Aguardando {sleep_time}s para o próximo envio...")
                     if self._interruptible_sleep(sleep_time):
@@ -299,6 +301,7 @@ class SenderWorker(QThread):
                 "execution_failed": self.execution_failed
             }
             
+            self._finished_emitted = True
             self.finished_sending.emit(summary)
             self.status_changed.emit("Processo finalizado")
             
@@ -311,7 +314,7 @@ class SenderWorker(QThread):
         finally:
             # Garante que finished_sending sempre seja emitido (P0-7)
             # Se ainda não foi emitido (ex: exceção antes do resumo), emite um resumo de erro
-            if not hasattr(self, '_finished_emitted') or not self._finished_emitted:
+            if not self._finished_emitted:
                 error_summary = {
                     "start_time": self.start_time.strftime("%Y-%m-%d %H:%M:%S") if self.start_time else "N/A",
                     "end_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -323,6 +326,7 @@ class SenderWorker(QThread):
                     "execution_failed": self.execution_failed,
                     "error": True
                 }
+                self._finished_emitted = True
                 self.finished_sending.emit(error_summary)
 
     def _emit_log(self, codigo: str, email: str, nome: str, status: str, erro: str):
