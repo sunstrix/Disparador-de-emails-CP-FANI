@@ -4,11 +4,11 @@
 # Responsável por:
 #   1) Verificar silenciosamente se existe nova versão no repositório (sem
 #      bloquear a abertura do aplicativo - sempre executado em QThread).
-#   2) Lançar o instalar_completo.bat com o argumento /atualizar, de forma
-#      ELEVADA (UAC), sempre a partir da pasta de instalação travada.
+#   2) Lançar o instalar_completo.bat com os argumentos /atualizar, /dir e /pid
+#      SEM elevação UAC (instalação per-user no perfil do usuário comum).
 #
 # SEGURANÇA:
-#   - Apenas HTTPS e apenas o repositório fixo abaixo.
+#   - Apenas HTTPS e apenas o repositório fixo oficial.
 #   - Payload limitado em tamanho e validado por regex estrita de versão.
 #   - Nunca executa nada baixado: apenas lê um número de versão.
 #   - A atualização NUNCA é aplicada sem confirmação explícita do usuário e
@@ -43,12 +43,11 @@ NETWORK_TIMEOUT_SECONDS = 5
 # uma string de versão; protege contra respostas abusivas).
 MAX_VERSION_BYTES = 512
 
-# Arquivo de log do updater (fica em DATA_DIR, fora da pasta travada).
+# Arquivo de log do updater (fica em DATA_DIR, fora da pasta de instalação).
 UPDATER_LOG_FILE = os.path.join(DATA_DIR, "updater.log")
 
-# Instalador completo (Parte 4-D) e seu argumento de atualização.
+# Instalador completo e seu nome de arquivo.
 INSTALLER_FILENAME = "instalar_completo.bat"
-UPDATE_ARGUMENT = "/atualizar"
 
 # Formato aceito: 1 | 1.0 | 1.0.0 | 1.0.0.0 (somente dígitos e pontos).
 VERSION_PATTERN = re.compile(r"^\d+(?:\.\d+){0,3}$")
@@ -66,7 +65,7 @@ def parse_version(raw: str) -> Optional[Tuple[int, ...]]:
     if not raw or not isinstance(raw, str):
         return None
 
-    cleaned = raw.strip()
+    cleaned = raw.replace("\ufeff", "").strip()
     if not VERSION_PATTERN.match(cleaned):
         return None
 
@@ -88,9 +87,13 @@ def compare_versions(remote: str, local: str) -> Optional[int]:
     local_t = parse_version(local)
 
     if remote_t is None or local_t is None:
+        write_log(
+            f"Erro ao comparar versões. Remote raw: '{remote}' (parsed: {remote_t}) "
+            f"| Local raw: '{local}' (parsed: {local_t})"
+        )
         return None
 
-    # Igualita os tamanhos para que "1.0" e "1.0.0" sejam considerados iguais.
+    # Iguala os tamanhos para que "1.0" e "1.0.0" sejam considerados iguais.
     size = max(len(remote_t), len(local_t))
     remote_t = remote_t + (0,) * (size - len(remote_t))
     local_t = local_t + (0,) * (size - len(local_t))
@@ -117,7 +120,6 @@ def fetch_remote_version(url: str = UPDATE_CHECK_URL) -> Tuple[bool, str]:
     Retorna (Sucesso: bool, Versão_ou_Motivo: str).
     Nunca lança exceção para fora: erros de rede viram (False, motivo).
     """
-    # Garantia de segurança: apenas HTTPS no repositório oficial.
     if not url.startswith("https://raw.githubusercontent.com/sunstrix/"):
         return False, "URL de verificação não permitida."
 
@@ -134,7 +136,6 @@ def fetch_remote_version(url: str = UPDATE_CHECK_URL) -> Tuple[bool, str]:
         if not text:
             return False, "version.txt remoto está vazio."
 
-        # Remove possível BOM residual e quebras de linha extras.
         text = text.lstrip("\ufeff").splitlines()[0].strip()
 
         if parse_version(text) is None:
@@ -168,21 +169,15 @@ def write_log(message: str):
 
 def get_installer_path() -> str:
     """
-    Retorna o caminho do instalar_completo.bat DENTRO da pasta de instalação
-    (CODE_DIR). Por segurança, o app nunca executa instalador de outro local.
+    Retorna o caminho do instalar_completo.bat DENTRO da pasta de instalação (CODE_DIR).
     """
     return os.path.join(CODE_DIR, INSTALLER_FILENAME)
 
 
 def launch_self_update() -> Tuple[bool, str]:
     """
-    Dispara o instalar_completo.bat com /atualizar de forma ELEVADA (UAC),
-    usando a cópia travada dentro da pasta de instalação.
-
-    Pré-condições (exigidas pela Parte 4-E):
-      - O aplicativo deve ter confirmado a ação com o usuário.
-      - Nenhum envio pode estar em andamento (verificado pelo chamador e
-        também bloqueado programaticamente em UpdateManager).
+    Dispara o instalar_completo.bat SEM elevação UAC (per-user),
+    passando os parâmetros /atualizar, /dir e /pid da instância atual.
 
     Retorna (Sucesso: bool, Mensagem: str).
     """
@@ -195,42 +190,37 @@ def launch_self_update() -> Tuple[bool, str]:
         write_log(f"Instalador não encontrado: {installer_path}")
         return False, (
             f"Instalador não encontrado em:\n{installer_path}\n\n"
-            "Execute o instalar_completo.bat manualmente como administrador."
+            "Execute o instalar_completo.bat manualmente."
         )
 
-    # Escape de aspas simples para o parser do PowerShell.
-    ps_installer = installer_path.replace("'", "''")
-    ps_workdir = CODE_DIR.replace("'", "''")
-    ps_argument = UPDATE_ARGUMENT.replace("'", "''")
-
-    ps_command = (
-        f"Start-Process -FilePath '{ps_installer}' "
-        f"-ArgumentList '{ps_argument}' "
-        f"-Verb RunAs "
-        f"-WorkingDirectory '{ps_workdir}'"
-    )
+    current_pid = os.getpid()
+    cmd = [
+        "cmd.exe",
+        "/c",
+        installer_path,
+        "/atualizar",
+        f'/dir:{CODE_DIR}',
+        f"/pid:{current_pid}"
+    ]
 
     creation_flags = 0
-    if hasattr(subprocess, "CREATE_NO_WINDOW"):
-        creation_flags = subprocess.CREATE_NO_WINDOW
+    if hasattr(subprocess, "CREATE_NEW_CONSOLE"):
+        creation_flags = subprocess.CREATE_NEW_CONSOLE
 
     try:
         subprocess.Popen(
-            [
-                "powershell.exe",
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-Command",
-                ps_command,
-            ],
+            cmd,
             creationflags=creation_flags,
             close_fds=True,
+            cwd=CODE_DIR
         )
-        write_log("Atualização solicitada: instalador elevado iniciado.")
+        write_log(
+            f"Atualização solicitada (sem elevação UAC). PID app: {current_pid} "
+            f"| Pasta: {CODE_DIR}"
+        )
         return True, (
-            "Atualizador iniciado. O aplicativo será fechado e a pasta será "
-            "atualizada. Seus dados (logs, templates, estado e credenciais) "
+            "Atualizador iniciado com sucesso. O aplicativo será fechado para "
+            "concluir a atualização. Seus dados e configurações em %LOCALAPPDATA% "
             "serão preservados."
         )
     except Exception as exc:
@@ -245,11 +235,9 @@ class UpdateChecker(QThread):
     """
     Verifica a versão remota em segundo plano.
     Sinais:
-      update_available(remote, local) -> há versão nova (UI mostra a FAIXA,
-                                          nunca QMessageBox modal)
+      update_available(remote, local) -> há versão nova
       no_update(remote)               -> já está atualizado
-      check_failed(reason)            -> offline/erro (UI ignora em silêncio,
-                                         apenas registra em updater.log)
+      check_failed(reason)            -> offline/erro
     """
 
     update_available = Signal(str, str)
@@ -267,16 +255,18 @@ class UpdateChecker(QThread):
 
     def run(self):
         try:
+            write_log(f"Iniciando verificação de versão. Versão local lida: '{self.local_version}'")
             success, payload = fetch_remote_version()
 
             if self._cancelled:
                 return
 
             if not success:
-                # Offline ou erro: comportamento é IGNORAR silenciosamente.
-                write_log(f"Verificação ignorada: {payload}")
+                write_log(f"Verificação de versão falhou ou foi ignorada: {payload}")
                 self.check_failed.emit(payload)
                 return
+
+            write_log(f"Versão remota obtida: '{payload}' | Versão local: '{self.local_version}'")
 
             if is_newer(payload, self.local_version):
                 write_log(
@@ -286,7 +276,7 @@ class UpdateChecker(QThread):
                 self.update_available.emit(payload, self.local_version)
             else:
                 write_log(
-                    f"Sem atualização. Remota: {payload} | "
+                    f"Sistema atualizado. Remota: {payload} | "
                     f"Local: {self.local_version}"
                 )
                 self.no_update.emit(payload)
@@ -301,9 +291,8 @@ class UpdateChecker(QThread):
 # ------------------------------------------------------------------------------
 class UpdateManager:
     """
-    Coordena a verificação e o lançamento da atualização, garantindo a regra
-    da Parte 4-E: NUNCA oferecer nem aplicar atualização com envio em
-    andamento. O bloqueio é programático, não depende apenas da UI.
+    Coordena a verificação e o lançamento da atualização, garantindo que
+    atualizações nunca sejam aplicadas enquanto houver envio em andamento.
     """
 
     def __init__(self, local_version: str = APP_VERSION):
@@ -313,7 +302,6 @@ class UpdateManager:
         self._pending_version: Optional[str] = None
         self._pending_local: Optional[str] = None
 
-    # --- Controle de envio em andamento -------------------------------------
     def set_sending_active(self, active: bool):
         """
         Chamado pela UI ao iniciar/finalizar o disparo.
@@ -331,7 +319,6 @@ class UpdateManager:
     def sending_active(self) -> bool:
         return self._sending_active
 
-    # --- Verificação ---------------------------------------------------------
     def start_check(self):
         """Inicia a verificação assíncrona. Ignora se já estiver rodando."""
         if self.checker is not None and self.checker.isRunning():
@@ -347,15 +334,12 @@ class UpdateManager:
             self.checker.wait(2000)
 
     def on_update_available(self, remote: str, local: str):
-        """
-        Registrado pela UI no sinal update_available.
-        Guarda a versão pendente caso o envio esteja ativo (adiamento).
-        """
+        """Guarda a versão pendente caso o envio esteja ativo."""
         self._pending_version = remote
         self._pending_local = local
 
     def clear_pending(self):
-        """Limpa a atualização pendente (usuário clicou em 'Depois')."""
+        """Limpa a atualização pendente."""
         self._pending_version = None
         self._pending_local = None
 
@@ -363,12 +347,8 @@ class UpdateManager:
     def pending_version(self) -> Optional[str]:
         return self._pending_version
 
-    # --- Aplicação -----------------------------------------------------------
     def can_launch_update(self) -> Tuple[bool, str]:
-        """
-        Valida se a atualização pode ser aplicada agora.
-        Retorna (Pode: bool, Motivo_se_nao_pode: str).
-        """
+        """Valida se a atualização pode ser aplicada no momento."""
         if self._sending_active:
             return False, (
                 "Há um envio em andamento. A atualização será oferecida "
@@ -378,17 +358,13 @@ class UpdateManager:
         if not os.path.isfile(get_installer_path()):
             return False, (
                 f"Instalador não encontrado em {get_installer_path()}. "
-                "Atualize manualmente executando o instalar_completo.bat "
-                "como administrador."
+                "Atualize executando o instalar_completo.bat manualmente."
             )
 
         return True, ""
 
     def apply_update(self) -> Tuple[bool, str]:
-        """
-        Aplica a atualização. Deve ser chamada SOMENTE após confirmação
-        explícita do usuário na interface.
-        """
+        """Aplica a atualização após confirmação na interface."""
         allowed, reason = self.can_launch_update()
         if not allowed:
             write_log(f"Atualização bloqueada: {reason}")
