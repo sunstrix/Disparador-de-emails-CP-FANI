@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul
-title Instalador Completo - Disparador de E-mails CP Fani
+title Instalador - Disparador de E-mails CP Fani
 color 0A
 
 :: ==============================================================================
@@ -9,10 +9,10 @@ color 0A
 set "LOG_DIR=%LOCALAPPDATA%\CPFani\logs"
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
 for /f %%I in ('powershell -Command "Get-Date -Format 'yyyyMMdd_HHmmss'"') do set TIMESTAMP=%%I
-set "LOG_FILE=%LOG_DIR%\instalar_completo_%TIMESTAMP%.log"
+set "LOG_FILE=%LOG_DIR%\instalar_%TIMESTAMP%.log"
 
 echo ============================================================ > "%LOG_FILE%"
-echo   LOG INSTALADOR COMPLETO - %TIMESTAMP% >> "%LOG_FILE%"
+echo   LOG INSTALADOR - %TIMESTAMP% >> "%LOG_FILE%"
 echo ============================================================ >> "%LOG_FILE%"
 
 :: ==============================================================================
@@ -43,7 +43,7 @@ set "UPDATE_MODE=0"
 if "%~1"=="/atualizar" set "UPDATE_MODE=1"
 
 echo ============================================================
-echo   INSTALADOR COMPLETO - DISPARADOR DE E-MAILS CP FANI
+echo   INSTALADOR - DISPARADOR DE E-MAILS CP FANI
 echo   Pasta de destino: %INSTALL_DIR%
 echo ============================================================
 echo Log: %LOG_FILE%
