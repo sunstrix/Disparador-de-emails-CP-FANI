@@ -7,13 +7,20 @@ __pycache__/
 venv/
 ENV/
 env/
+.venv/
 
-# Dados graváveis do usuário (NÃO versionar)
+# Dados graváveis do usuário e planilhas com dados sensíveis (LGPD)
 app_state.json
 logs/
 templates/
 updater.log
 crash.log
+*.log
+*.xlsx
+*.xls
+*.csv
+INA5.xlsx
+*.bak
 
 # IDE
 .vscode/
@@ -28,4 +35,3 @@ Thumbs.db
 # Permitir pastas vazias de recursos (o .gitkeep dentro delas será versionado)
 !logo/.gitkeep
 !ico/.gitkeep
-app/ui/components.py.bak
