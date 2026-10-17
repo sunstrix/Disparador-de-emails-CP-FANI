@@ -139,14 +139,14 @@ class SMTPClient:
         return False, f"Falha após {retry_count} tentativas: {last_error}"
 
     def _create_server(self) -> smtplib.SMTP:
-        """Cria e autentica a conexão com o servidor SMTP."""
+        """Cria e autentica a conexão com o servidor SMTP com timeout estipulado em 30 segundos."""
         host = self.server_config["host"]
         
         if self.security == "SSL":
             context = ssl.create_default_context()
-            server = smtplib.SMTP_SSL(host, self.port, context=context, timeout=15)
+            server = smtplib.SMTP_SSL(host, self.port, context=context, timeout=30)
         else:  # STARTTLS
-            server = smtplib.SMTP(host, self.port, timeout=15)
+            server = smtplib.SMTP(host, self.port, timeout=30)
             server.starttls(context=ssl.create_default_context())
             
         server.login(self.email, self.password)
