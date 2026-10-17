@@ -6,8 +6,9 @@
 
 import os
 import sys
+import shutil
 
-def resource_path(relative_path):
+def resource_path(relative_path: str) -> str:
     """
     Obtém o caminho absoluto para o recurso.
     Funciona tanto em desenvolvimento quanto empacotado com PyInstaller.
@@ -19,22 +20,22 @@ def resource_path(relative_path):
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
 
-# Diretório do código (para verificação de permissão de escrita)
+# Diretório do código
 if getattr(sys, 'frozen', False):
     CODE_DIR = os.path.dirname(sys.executable)
 else:
     CODE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Lógica para DATA_DIR (dados graváveis: logs, templates, app_state.json)
-# Se estiver empacotado (frozen) ou se o diretório de código não for gravável, usa LOCALAPPDATA
-if getattr(sys, 'frozen', False) or not os.access(CODE_DIR, os.W_OK):
+# Modo Desenvolvimento: ativado somente via variável CPFANI_DEV=1 ou presença da pasta .git
+IS_DEV = os.environ.get("CPFANI_DEV") == "1" or os.path.exists(os.path.join(CODE_DIR, ".git"))
+
+# Lógica para DATA_DIR (dados graváveis do usuário: logs, templates, app_state.json)
+# Em ambiente de produção/instalação, armazena SEMPRE em %LOCALAPPDATA%\CPFani
+if IS_DEV:
+    DATA_DIR = CODE_DIR
+else:
     local_app_data = os.environ.get('LOCALAPPDATA', os.path.expanduser('~/.local/share'))
     DATA_DIR = os.path.join(local_app_data, 'CPFani')
-else:
-    DATA_DIR = CODE_DIR
-
-# Garantir que o diretório de dados exista
-os.makedirs(DATA_DIR, exist_ok=True)
 
 # ==============================================================================
 # 1. LIMITES E SEGURANÇA (ANTI-BLOQUEIO DE SMTP)
@@ -79,19 +80,58 @@ REPORT_EMAIL = "ti@didier.com.br"
 # ==============================================================================
 # 4. CAMINHOS DE DIRETÓRIOS E ARQUIVOS
 # ==============================================================================
-# Recursos somente leitura (usando resource_path para compatibilidade com PyInstaller)
+# Recursos somente leitura
 LOGO_FILE = resource_path(os.path.join("logo", "logo.png"))
 ICON_FILE = resource_path(os.path.join("ico", "icone.ico"))
 VERSION_FILE = resource_path("version.txt")
 
-# Dados graváveis (apontam para DATA_DIR, protegido contra PermissionError em C:\)
+# Dados graváveis (apontam para DATA_DIR em %LOCALAPPDATA%\CPFani)
 LOGS_DIR = os.path.join(DATA_DIR, "logs")
 TEMPLATES_DIR = os.path.join(DATA_DIR, "templates")
 APP_STATE_FILE = os.path.join(DATA_DIR, "app_state.json")
 
-# Garantir existência das subpastas de dados
-os.makedirs(LOGS_DIR, exist_ok=True)
-os.makedirs(TEMPLATES_DIR, exist_ok=True)
+def _migrate_old_data():
+    """
+    Migração única: se existirem logs, templates ou app_state.json dentro da pasta de
+    instalação (de versões anteriores), move os arquivos para %LOCALAPPDATA%\CPFani
+    sem sobrescrever o que já existir lá.
+    """
+    if IS_DEV or CODE_DIR == DATA_DIR:
+        return
+
+    items_to_migrate = ["logs", "templates", "app_state.json"]
+    for item in items_to_migrate:
+        src = os.path.join(CODE_DIR, item)
+        dst = os.path.join(DATA_DIR, item)
+
+        if not os.path.exists(src):
+            continue
+
+        try:
+            os.makedirs(DATA_DIR, exist_ok=True)
+            if os.path.isdir(src):
+                os.makedirs(dst, exist_ok=True)
+                for file_name in os.listdir(src):
+                    src_file = os.path.join(src, file_name)
+                    dst_file = os.path.join(dst, file_name)
+                    if os.path.isfile(src_file) and not os.path.exists(dst_file):
+                        shutil.move(src_file, dst_file)
+                if not os.listdir(src):
+                    os.rmdir(src)
+            elif os.path.isfile(src) and not os.path.exists(dst):
+                shutil.move(src, dst)
+        except Exception:
+            pass
+
+def init_data_dir():
+    """
+    Inicializa a estrutura de diretórios graváveis sob demanda ou no startup,
+    evitando efeitos colaterais de I/O na simples importação do módulo.
+    """
+    _migrate_old_data()
+    os.makedirs(DATA_DIR, exist_ok=True)
+    os.makedirs(LOGS_DIR, exist_ok=True)
+    os.makedirs(TEMPLATES_DIR, exist_ok=True)
 
 # ==============================================================================
 # 5. VARIÁVEIS DE SUBSTITUIÇÃO (TEMPLATES)
@@ -110,12 +150,12 @@ SPECIAL_VARIABLES = {
 # ==============================================================================
 APP_TITLE = "Disparador de E-mails CP Fani"
 
-def get_app_version():
-    """Lê a versão do arquivo version.txt, com fallback para '1.0.0'."""
+def get_app_version() -> str:
+    """Lê a versão do arquivo version.txt, com suporte a utf-8-sig e fallback '1.0.0'."""
     try:
         if os.path.exists(VERSION_FILE):
-            with open(VERSION_FILE, 'r', encoding='utf-8') as f:
-                version = f.read().strip()
+            with open(VERSION_FILE, 'r', encoding='utf-8-sig') as f:
+                version = f.read().replace('\ufeff', '').strip()
                 if version:
                     return version
     except Exception:
