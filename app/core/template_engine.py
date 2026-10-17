@@ -55,6 +55,20 @@ def format_full_name(full_name: str) -> str:
         return ""
     return full_name.strip().title()
 
+def _clean_val(val: Any) -> str:
+    """
+    Auxiliar para limpar e converter valores de variáveis,
+    removendo sufixos .0 e tratando nulos/NaNs.
+    """
+    if val is None:
+        return ""
+    val_str = str(val).strip()
+    if val_str.lower() in ('nan', 'none', 'null', '<na>'):
+        return ""
+    if re.match(r'^\d+\.0$', val_str):
+        val_str = val_str[:-2]
+    return val_str
+
 def render_template(
     text: str, 
     row_data: Dict[str, Any], 
@@ -71,7 +85,11 @@ def render_template(
         return text
 
     # Prepara um dicionário de chaves normalizadas para busca rápida
-    normalized_row = {normalize_key(k): str(v).strip() for k, v in row_data.items() if v is not None}
+    normalized_row = {
+        normalize_key(k): _clean_val(v) 
+        for k, v in row_data.items() 
+        if v is not None
+    }
 
     def replacer(match: re.Match) -> str:
         var_raw = match.group(1).strip()
@@ -92,8 +110,8 @@ def render_template(
         # Busca normal na planilha
         val = normalized_row.get(var_key, "")
         
-        # Se estiver vazio ou for apenas a string 'nan' do pandas
-        if not val or val.lower() == 'nan':
+        # Se estiver vazio ou for nulo/nan
+        if not val or val.lower() in ('nan', 'none', 'null', '<na>'):
             return html.escape(fallback)
             
         # Escapa o valor para evitar injeção de HTML acidental (P1-2)
