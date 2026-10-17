@@ -81,6 +81,9 @@ def main():
     # Cria a aplicação Qt
     app = QApplication(sys.argv)
     
+    # Impede que fechar um QMessageBox encerre o app quando a janela principal estiver oculta na bandeja
+    app.setQuitOnLastWindowClosed(False)
+    
     # Garante a existencia do DATA_DIR para criar o lock
     os.makedirs(DATA_DIR, exist_ok=True)
     
