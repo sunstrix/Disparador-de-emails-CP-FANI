@@ -37,16 +37,19 @@ def exception_hook(exc_type, exc_value, exc_tb):
     error_msg = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
+    # Garante que a pasta de dados exista antes de gravar o crash.log
+    os.makedirs(DATA_DIR, exist_ok=True)
+    crash_log = os.path.join(DATA_DIR, "crash.log")
+    
     # Loga em arquivo
     try:
-        crash_log = os.path.join(DATA_DIR, "crash.log")
         with open(crash_log, "a", encoding="utf-8") as f:
             f.write(f"\n{'='*80}\n")
             f.write(f"[{timestamp}] Exceção não tratada:\n")
             f.write(error_msg)
             f.write(f"{'='*80}\n")
     except Exception:
-        pass  # Se falhar ao logar, não pode fazer nada
+        pass  # Se falhar ao logar, continua a execução da finalização
     
     # Mostra diálogo de erro (apenas se QApplication ainda existir)
     app = QApplication.instance()
@@ -56,7 +59,7 @@ def exception_hook(exc_type, exc_value, exc_tb):
                 None,
                 "Erro Crítico",
                 f"Ocorreu um erro inesperado:\n\n{exc_value}\n\n"
-                f"O detalhe foi salvo em:\n{crash_log if 'crash_log' in locals() else 'crash.log'}"
+                f"O detalhe foi salvo em:\n{crash_log}"
             )
         except Exception:
             pass  # Se falhar ao mostrar diálogo, continua
@@ -78,6 +81,9 @@ def main():
     # Cria a aplicação Qt
     app = QApplication(sys.argv)
     
+    # Garante a existencia do DATA_DIR para criar o lock
+    os.makedirs(DATA_DIR, exist_ok=True)
+    
     # Instância única via QLockFile (P1-11)
     lock_file_path = os.path.join(DATA_DIR, "app.lock")
     lock_file = QLockFile(lock_file_path)
@@ -97,7 +103,6 @@ def main():
     app.setApplicationName(APP_TITLE)
     app.setApplicationVersion(APP_VERSION)
     app.setOrganizationName("CP Fani")
-    # setOrganizationDomain removido conforme confirmado (não usamos QSettings)
     
     # Define ícone da aplicação (P1-11)
     if os.path.exists(ICON_FILE):
@@ -112,7 +117,8 @@ def main():
     def on_about_to_quit():
         app._is_closing = True
         # Remove o lock file ao sair
-        lock_file.unlock()
+        if lock_file.isLocked():
+            lock_file.unlock()
     
     app.aboutToQuit.connect(on_about_to_quit)
     
