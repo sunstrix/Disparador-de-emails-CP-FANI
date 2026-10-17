@@ -29,7 +29,7 @@ if not exist "main.py" (
     echo Pasta atual: %CD% >> "%LOG_FILE%"
     echo.
     echo ERRO: Arquivo main.py nao encontrado.
-    echo Execute o "instalar_completo.bat" para reinstalar.
+    echo Execute o "instalar_completo.bat" para reinstalar os arquivos.
     pause
     exit /b 1
 )
@@ -41,7 +41,7 @@ if not exist "venv\Scripts\python.exe" (
     echo Caminho esperado: %CD%\venv\Scripts\python.exe >> "%LOG_FILE%"
     echo.
     echo ERRO: Ambiente virtual nao encontrado.
-    echo Execute o "instalar_completo.bat" para reinstalar.
+    echo Execute o "instalar_completo.bat" para reinstalar o ambiente.
     pause
     exit /b 1
 )
@@ -52,39 +52,16 @@ if not exist "requirements.txt" (
     echo ERRO CRITICO: Arquivo requirements.txt nao encontrado. >> "%LOG_FILE%"
     echo.
     echo ERRO: Arquivo requirements.txt nao encontrado.
-    echo Execute o "instalar_completo.bat" para reinstalar.
+    echo Execute o "instalar_completo.bat" para reinstalar os arquivos.
     pause
     exit /b 1
 )
 echo [OK] Arquivo requirements.txt encontrado. >> "%LOG_FILE%"
 
-:: Verificar dependencias
-echo Verificando dependencias... >> "%LOG_FILE%"
-echo Verificando dependencias...
-"venv\Scripts\python.exe" -c "import PySide6" >nul 2>&1
-if errorlevel 1 (
-    echo AVISO: Dependencias nao instaladas. Instalando... >> "%LOG_FILE%"
-    echo AVISO: Dependencias nao instaladas. Instalando automaticamente...
-    "venv\Scripts\python.exe" -m pip install -r requirements.txt --quiet >> "%LOG_FILE%" 2>&1
-    if errorlevel 1 (
-        echo ERRO: Falha ao instalar dependencias! >> "%LOG_FILE%"
-        echo.
-        echo ERRO: Falha ao instalar dependencias!
-        echo Execute o "instalar.bat" manualmente.
-        pause
-        exit /b 1
-    )
-    echo Dependencias instaladas com sucesso! >> "%LOG_FILE%"
-    echo Dependencias instaladas com sucesso!
-) else (
-    echo Dependencias OK! >> "%LOG_FILE%"
-    echo Dependencias OK!
-)
 echo.
-
-echo Iniciando aplicativo... >> "%LOG_FILE%"
 echo Iniciando aplicativo...
-echo.
+echo Iniciando main.py em %TIMESTAMP% >> "%LOG_FILE%"
+echo. >> "%LOG_FILE%"
 
 :: Executa o main.py e captura toda saida (stdout + stderr) no log
 "venv\Scripts\python.exe" main.py >> "%LOG_FILE%" 2>&1
@@ -103,6 +80,11 @@ if %EXIT_CODE% neq 0 (
     echo ============================================================
     echo.
     echo Log completo salvo em: %LOG_FILE%
+    echo.
+    echo Possiveis causas:
+    echo   - Dependencias desatualizadas ou corrompidas (rode instalar_completo.bat)
+    echo   - Erro no codigo do main.py
+    echo   - Falta de permissao na pasta
     echo.
     pause
     exit /b %EXIT_CODE%
