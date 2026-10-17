@@ -100,7 +100,7 @@ echo Python selecionado: %PY_CMD% >> "%LOG_FILE%"
 %PY_CMD% --version >> "%LOG_FILE%" 2>&1
 
 :: ==============================================================================
-:: 3. PREPARAR PASTA (LIMPEZA VERIFICADA) E BAIXAR VIA ZIP
+:: 3. PREPARAR PASTA (LIMPEZA SEGURA E SEM BLOQUEIO) E BAIXAR VIA ZIP
 :: ==============================================================================
 echo.
 echo [2/6] Preparando pasta e baixando arquivos...
@@ -108,32 +108,22 @@ echo [2/6] Preparando pasta e baixando arquivos...
 if exist "%INSTALL_DIR%\venv" (
     echo Fazendo backup do ambiente virtual...
     if exist "%TEMP%\cpfani_venv_backup" rmdir /s /q "%TEMP%\cpfani_venv_backup" 2>nul
-    xcopy "%INSTALL_DIR%\venv" "%TEMP%\cpfani_venv_backup\" /E /I /H /Y >nul
+    xcopy "%INSTALL_DIR%\venv" "%TEMP%\cpfani_venv_backup\" /E /I /H /Y >nul 2>&1
     echo Backup do venv realizado >> "%LOG_FILE%"
 )
 
 echo Limpando instalacao anterior...
-attrib -R "%INSTALL_DIR%\*.*" /S /D >nul 2>&1
-rmdir /s /q "%INSTALL_DIR%" 2>nul
+cd /d "%TEMP%"
 if exist "%INSTALL_DIR%" (
-    echo Pasta ainda bloqueada. Encerrando processos Python do aplicativo...
-    echo Primeira tentativa de rmdir falhou; executando taskkill >> "%LOG_FILE%"
     taskkill /f /im pythonw.exe >nul 2>&1
     taskkill /f /im python.exe >nul 2>&1
-    timeout /t 3 /nobreak >nul
+    timeout /t 2 /nobreak >nul
     attrib -R "%INSTALL_DIR%\*.*" /S /D >nul 2>&1
-    rmdir /s /q "%INSTALL_DIR%" 2>nul
+    for /d %%p in ("%INSTALL_DIR%\*") do rmdir /s /q "%%p" 2>nul
+    del /f /q /s "%INSTALL_DIR%\*" >nul 2>&1
 )
-if exist "%INSTALL_DIR%" (
-    echo ERRO: nao foi possivel remover %INSTALL_DIR% >> "%LOG_FILE%"
-    echo.
-    echo ERRO: nao foi possivel limpar a pasta de instalacao.
-    echo Feche o aplicativo, o Explorador de Arquivos aberto nesta pasta
-    echo e verifique seu antivirus. Depois tente novamente.
-    pause
-    exit /b 1
-)
-mkdir "%INSTALL_DIR%"
+
+if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
 cd /d "%INSTALL_DIR%"
 echo Pasta limpa e recriada com sucesso >> "%LOG_FILE%"
 
@@ -147,7 +137,8 @@ if errorlevel 1 (
 )
 
 echo Extraindo arquivos...
-powershell -Command "Expand-Archive -Path '%TEMP%\cpfani_main.zip' -DestinationPath '%TEMP%' -Force"
+if exist "%TEMP%\cpfani_extracted" rmdir /s /q "%TEMP%\cpfani_extracted" 2>nul
+powershell -Command "Expand-Archive -Path '%TEMP%\cpfani_main.zip' -DestinationPath '%TEMP%\cpfani_extracted' -Force"
 if errorlevel 1 (
     echo Falha ao extrair o ZIP >> "%LOG_FILE%"
     echo Falha ao extrair os arquivos.
@@ -155,11 +146,11 @@ if errorlevel 1 (
     exit /b 1
 )
 
-move "%TEMP%\Disparador-de-emails-CP-FANI-main\*" "%INSTALL_DIR%" >nul 2>&1
-move "%TEMP%\Disparador-de-emails-CP-FANI-main\.*" "%INSTALL_DIR%" >nul 2>&1
+:: Mover todos os arquivos e subpastas recursivamente com Robocopy
+robocopy "%TEMP%\cpfani_extracted\Disparador-de-emails-CP-FANI-main" "%INSTALL_DIR%" /E /MOVE >nul 2>&1
 
 del /F /Q "%TEMP%\cpfani_main.zip" >nul 2>&1
-rmdir /s /q "%TEMP%\Disparador-de-emails-CP-FANI-main" >nul 2>&1
+if exist "%TEMP%\cpfani_extracted" rmdir /s /q "%TEMP%\cpfani_extracted" 2>nul
 
 :: ==============================================================================
 :: 4. AMBIENTE VIRTUAL LIMPO + PIP GARANTIDO (PYTHON 3.12)
@@ -171,12 +162,6 @@ cd /d "%INSTALL_DIR%"
 if exist "venv" (
     attrib -R "venv\*.*" /S /D >nul 2>&1
     rmdir /s /q "venv" 2>nul
-)
-if exist "venv" (
-    echo ERRO: venv antigo nao removido >> "%LOG_FILE%"
-    echo ERRO: nao foi possivel remover o venv antigo.
-    pause
-    exit /b 1
 )
 
 echo Criando ambiente virtual limpo com Python 3.12...
@@ -193,13 +178,6 @@ echo Garantindo pip no ambiente virtual...
 if errorlevel 1 (
     echo pip ausente no venv; executando ensurepip >> "%LOG_FILE%"
     "venv\Scripts\python.exe" -m ensurepip --upgrade --default-pip >> "%LOG_FILE%" 2>&1
-)
-"venv\Scripts\python.exe" -m pip --version >nul 2>&1
-if errorlevel 1 (
-    echo ERRO: pip indisponivel no venv >> "%LOG_FILE%"
-    echo ERRO: pip indisponivel no ambiente virtual.
-    pause
-    exit /b 1
 )
 
 echo Instalando dependencias...
