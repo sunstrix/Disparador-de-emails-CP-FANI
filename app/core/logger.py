@@ -35,14 +35,19 @@ class CampaignLogger:
     def _init_csv(self):
         """Cria o arquivo CSV e escreve o cabeçalho usando utf-8-sig para compatibilidade com Excel."""
         headers = ["Data/Hora", "CodigoRevendedor", "Destinatario", "Nome", "Status", "Erro"]
-        with open(self.log_filepath, mode='w', newline='', encoding='utf-8-sig') as f:
-            writer = csv.writer(f, delimiter=';')
-            writer.writerow(headers)
+        try:
+            with open(self.log_filepath, mode='w', newline='', encoding='utf-8-sig') as f:
+                writer = csv.writer(f, delimiter=';')
+                writer.writerow(headers)
+        except (PermissionError, OSError):
+            # Se por algum motivo o arquivo inicial falhar, prossegue sem travar a aplicacao
+            pass
 
     def log_entry(self, entry: dict):
         """
         Adiciona uma linha ao arquivo de log.
         Espera um dicionário com as chaves: data_hora, codigo, destinatario, nome, status, erro.
+        Trata PermissionError para evitar interrupção do envio se o arquivo estiver aberto no Excel.
         """
         row = [
             entry.get("data_hora", ""),
@@ -52,9 +57,27 @@ class CampaignLogger:
             entry.get("status", ""),
             entry.get("erro", "")
         ]
-        with open(self.log_filepath, mode='a', newline='', encoding='utf-8-sig') as f:
-            writer = csv.writer(f, delimiter=';')
-            writer.writerow(row)
+        
+        try:
+            with open(self.log_filepath, mode='a', newline='', encoding='utf-8-sig') as f:
+                writer = csv.writer(f, delimiter=';')
+                writer.writerow(row)
+        except (PermissionError, OSError):
+            # Tenta gravar em um arquivo alternativo caso o principal esteja bloqueado (ex: aberto no Excel)
+            alt_filepath = self.log_filepath.replace(".csv", "_alt.csv")
+            try:
+                if not os.path.exists(alt_filepath):
+                    headers = ["Data/Hora", "CodigoRevendedor", "Destinatario", "Nome", "Status", "Erro"]
+                    with open(alt_filepath, mode='w', newline='', encoding='utf-8-sig') as f_alt:
+                        writer = csv.writer(f_alt, delimiter=';')
+                        writer.writerow(headers)
+                
+                with open(alt_filepath, mode='a', newline='', encoding='utf-8-sig') as f_alt:
+                    writer = csv.writer(f_alt, delimiter=';')
+                    writer.writerow(row)
+            except Exception:
+                # Garante que falhas de E/S de log nunca interrompam a thread principal de disparo
+                pass
 
     def send_final_report(self, summary: dict, smtp_config: dict):
         """
@@ -98,18 +121,27 @@ class CampaignLogger:
         
         msg.attach(MIMEText(body_text, "plain", "utf-8"))
         
-        # Anexa o arquivo CSV
-        if os.path.exists(self.log_filepath):
-            with open(self.log_filepath, "rb") as attachment:
-                part = MIMEBase("application", "octet-stream")
-                part.set_payload(attachment.read())
-            
-            encoders.encode_base64(part)
-            part.add_header(
-                "Content-Disposition",
-                f"attachment; filename={self.log_filename}",
-            )
-            msg.attach(part)
+        # Anexa o arquivo CSV (tenta o principal ou o alternativo se o principal nao existiu)
+        target_log = self.log_filepath
+        if not os.path.exists(target_log):
+            alt_log = self.log_filepath.replace(".csv", "_alt.csv")
+            if os.path.exists(alt_log):
+                target_log = alt_log
+
+        if os.path.exists(target_log):
+            try:
+                with open(target_log, "rb") as attachment:
+                    part = MIMEBase("application", "octet-stream")
+                    part.set_payload(attachment.read())
+                
+                encoders.encode_base64(part)
+                part.add_header(
+                    "Content-Disposition",
+                    f"attachment; filename={os.path.basename(target_log)}",
+                )
+                msg.attach(part)
+            except Exception:
+                pass
             
         # Envia o e-mail usando a conexão reutilizável (P0-4)
         client = None
