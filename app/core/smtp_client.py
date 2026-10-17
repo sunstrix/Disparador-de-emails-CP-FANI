@@ -21,6 +21,7 @@ from email.utils import formataddr, formatdate, make_msgid
 
 from app.config import SMTP_SERVERS
 
+
 class SMTPClient:
     def __init__(
         self, 
@@ -63,8 +64,9 @@ class SMTPClient:
         try:
             self.server = self._create_server()
             return True, "Conexão e autenticação bem-sucedidas!"
-        except smtplib.SMTPAuthenticationError:
-            return False, "Falha na autenticação. Verifique seu e-mail e senha (Gmail exige 'Senha de App')."
+        except smtplib.SMTPAuthenticationError as e:
+            code = getattr(e, 'smtp_code', 535)
+            return False, f"Falha na autenticação (código {code}). Verifique seu e-mail e senha (Gmail exige 'Senha de App')."
         except smtplib.SMTPConnectError as e:
             return False, f"Falha ao conectar ao servidor: {e}"
         except Exception as e:
@@ -99,7 +101,7 @@ class SMTPClient:
         """
         Envia um e-mail com suporte a HTML, texto plano e imagens inline.
         Reutiliza a conexão ativa. Reconecta automaticamente em caso de queda.
-        Implementa retry com backoff para falhas transitórias.
+        Classifica exceções por tipo/código SMTP (5xx permanente vs 4xx transitório).
         """
         last_error = ""
         for attempt in range(retry_count):
@@ -107,36 +109,65 @@ class SMTPClient:
                 # Garante que estamos conectados
                 success, msg = self.connect()
                 if not success:
-                    # Falhas permanentes (autenticação) não devem ser repetidas
-                    if "autenticação" in msg.lower() or "refused" in msg.lower():
+                    last_error = msg
+                    if "autenticação" in msg.lower() or "535" in msg:
                         return False, msg
                     
-                    last_error = msg
-                    time.sleep(2 ** attempt)  # Backoff exponencial simples
+                    if attempt < retry_count - 1:
+                        self._backoff_sleep(2 ** attempt)
                     continue
 
                 # Monta e envia a mensagem
                 msg_obj = self._build_message(to_email, to_name, subject, html_body, text_body)
                 self.server.send_message(msg_obj)
                 
-                # Se chegou aqui, o envio foi bem-sucedido.
-                # NÃO chamamos quit() aqui para permitir a reutilização da conexão (P0-4).
-                # O método close() deve ser chamado ao final do lote pelo chamador.
                 return True, "Enviado com sucesso"
 
-            except smtplib.SMTPServerDisconnected:
-                last_error = "Conexão perdida com o servidor. Tentando reconectar..."
-                self.server = None  # Força reconexão no próximo loop
-            except smtplib.SMTPRecipientsRefused:
-                return False, "E-mail do destinatário recusado pelo servidor."
+            except smtplib.SMTPAuthenticationError as e:
+                code = getattr(e, 'smtp_code', 535)
+                msg_text = e.smtp_error.decode('utf-8', errors='replace') if isinstance(getattr(e, 'smtp_error', ''), bytes) else str(e)
+                return False, f"Falha de autenticação ({code}): {msg_text}"
+
+            except smtplib.SMTPRecipientsRefused as e:
+                return False, f"E-mail do destinatário recusado pelo servidor: {e}"
+
+            except smtplib.SMTPSenderRefused as e:
+                return False, f"Endereço do remetente recusado pelo servidor: {e}"
+
+            except smtplib.SMTPDataError as e:
+                code = getattr(e, 'smtp_code', 500)
+                msg_text = e.smtp_error.decode('utf-8', errors='replace') if isinstance(getattr(e, 'smtp_error', ''), bytes) else str(e)
+                if 500 <= code < 600:
+                    return False, f"Erro permanente do servidor ({code}): {msg_text}"
+                last_error = f"Erro temporário do servidor ({code}): {msg_text}"
+                self.server = None
+
+            except smtplib.SMTPResponseException as e:
+                code = getattr(e, 'smtp_code', 500)
+                msg_text = e.smtp_error.decode('utf-8', errors='replace') if isinstance(getattr(e, 'smtp_error', ''), bytes) else str(e)
+                if 500 <= code < 600:
+                    return False, f"Erro permanente no servidor ({code}): {msg_text}"
+                last_error = f"Erro no servidor ({code}): {msg_text}"
+                self.server = None
+
+            except (smtplib.SMTPServerDisconnected, OSError, ssl.SSLError, TimeoutError) as e:
+                last_error = f"Falha na conexão SMTP: {str(e)}"
+                self.server = None
+
             except Exception as e:
-                last_error = str(e)
-                self.server = None  # Força reconexão em erros genéricos de rede
-                
-            # Backoff antes da próxima tentativa
-            time.sleep(2 ** attempt)
-            
+                last_error = f"Erro inesperado: {str(e)}"
+                self.server = None
+
+            if attempt < retry_count - 1:
+                self._backoff_sleep(2 ** attempt)
+
         return False, f"Falha após {retry_count} tentativas: {last_error}"
+
+    def _backoff_sleep(self, seconds: float):
+        """Dorme em intervalos fracionados para evitar bloqueio estático prolongado."""
+        steps = int(seconds * 10)
+        for _ in range(steps):
+            time.sleep(0.1)
 
     def _create_server(self) -> smtplib.SMTP:
         """Cria e autentica a conexão com o servidor SMTP com timeout estipulado em 30 segundos."""
@@ -166,13 +197,11 @@ class SMTPClient:
         """
         msg = MIMEMultipart("related")
         
-        # Cabeçalhos obrigatórios e de boa prática (P1-6)
         msg["Subject"] = Header(subject, "utf-8")
         msg["From"] = formataddr(("CP Fani", self.email))
         msg["To"] = formataddr((to_name, to_email))
         msg["Date"] = formatdate(localtime=True)
         
-        # Message-ID único baseado no domínio do remetente
         domain = self.email.split('@')[1] if '@' in self.email else "cp-fani.local"
         msg["Message-ID"] = make_msgid(domain=domain)
         
@@ -181,17 +210,14 @@ class SMTPClient:
         if self.list_unsubscribe:
             msg["List-Unsubscribe"] = f"<{self.list_unsubscribe}>"
 
-        # Multipart alternative para fallback texto puro
         alt_part = MIMEMultipart("alternative")
         alt_part.attach(MIMEText(text_body, "plain", "utf-8"))
         
-        # Processar HTML para encontrar e substituir imagens locais por CIDs
         html_processed, images = self._process_inline_images(html_body)
         alt_part.attach(MIMEText(html_processed, "html", "utf-8"))
         
         msg.attach(alt_part)
 
-        # Anexar imagens como inline
         for cid, img_path in images.items():
             if os.path.exists(img_path):
                 with open(img_path, "rb") as f:
@@ -214,12 +240,11 @@ class SMTPClient:
     def _process_inline_images(self, html_body: str) -> Tuple[str, Dict[str, str]]:
         """
         Procura por tags <img> com src local e as substitui por referências CID,
-        retornando o HTML modificado e o dicionário de imagens {cid: caminho_limpo}.
+        ajustando a sintaxe da tag HTML e adicionando compatibilidade com Outlook.
         """
         path_to_cid = {}
         cid_to_path = {}
         
-        # Regex que captura o prefixo, o src exato e o sufixo da tag
         pattern = re.compile(r'(<img[^>]*?\bsrc=["\'])([^"\']+)(["\'][^>]*>)', re.IGNORECASE)
         
         def replacer(match: re.Match) -> str:
@@ -227,37 +252,46 @@ class SMTPClient:
             src = match.group(2)
             suffix = match.group(3)
             
-            # Ignorar URLs externas
             if src.startswith(("http://", "https://", "data:")):
                 return match.group(0)
                 
-            # Decodificar URL (ex: %20 para espaço)
             clean_src = urllib.parse.unquote(src)
             
-            # Tratar prefixos de arquivo local (Windows e Unix)
             if clean_src.startswith("file:///"):
                 clean_src = clean_src[8:]
             elif clean_src.startswith("file://"):
                 clean_src = clean_src[7:]
                 
-            # Normalizar o caminho para o sistema operacional atual
             clean_src = os.path.normpath(clean_src)
             
-            # Deduplicação: reutilizar o mesmo CID para o mesmo arquivo
             if clean_src in path_to_cid:
                 cid = path_to_cid[clean_src]
             else:
                 cid = f"img_{len(path_to_cid) + 1}@cp-fani.local"
                 path_to_cid[clean_src] = cid
                 cid_to_path[cid] = clean_src
+
+            if suffix.endswith("/>"):
+                closing = "/>"
+                attrs = suffix[:-2]
+            elif suffix.endswith(">"):
+                closing = ">"
+                attrs = suffix[:-1]
+            else:
+                closing = ">"
+                attrs = suffix
+
+            attrs_lower = attrs.lower()
+            extra_attrs = ""
+            
+            if "width=" not in attrs_lower:
+                extra_attrs += ' width="100%"'
                 
-            # Garantir estilo de redimensionamento se a tag não tiver width ou style
-            # (O Qt às vezes descarta max-width no toHtml)
-            if 'style=' not in suffix.lower() and 'width=' not in suffix.lower():
-                # Insere o style antes do fechamento da tag (ex: ">" ou "/>")
-                suffix = suffix[:-1] + ' style="max-width: 100%; height: auto;"' + suffix[-1]
+            if "style=" not in attrs_lower:
+                extra_attrs += ' style="max-width: 100%; height: auto;"'
                 
-            return f'{prefix}cid:{cid}{suffix}'
+            new_suffix = f"{attrs}{extra_attrs}{closing}"
+            return f'{prefix}cid:{cid}{new_suffix}'
         
         html_processed = pattern.sub(replacer, html_body)
         return html_processed, cid_to_path
