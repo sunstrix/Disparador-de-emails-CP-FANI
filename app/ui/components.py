@@ -20,9 +20,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import (
     QAction, QIcon, QFont, QTextCursor, QImage, QClipboard, QKeySequence,
     QTextCharFormat, QColor, QBrush, QTextBlockFormat, QDesktopServices,
-    QMimeData
 )
-from PySide6.QtCore import Qt, QUrl, QAbstractTableModel, QModelIndex
+from PySide6.QtCore import Qt, QUrl, QAbstractTableModel, QModelIndex, QMimeData
 
 from app.config import ASSETS_DIR, LOGO_FILE, TEMPLATES_DIR
 
