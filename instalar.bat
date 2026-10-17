@@ -1,172 +1,330 @@
 @echo off
 chcp 65001 >nul
-title Instalador - Disparador de E-mails CP Fani
+title Instalador Completo - Disparador de E-mails CP Fani
 color 0A
 
-:: Criar pasta de logs se nao existir
-if not exist "logs" mkdir logs
-
-:: Gerar timestamp via PowerShell (formato universal)
+:: ==============================================================================
+:: CONFIGURACAO DE VARIAVEIS E LOGS
+:: ==============================================================================
+set "LOG_DIR=%LOCALAPPDATA%\CPFani\logs"
+if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
 for /f %%I in ('powershell -Command "Get-Date -Format 'yyyyMMdd_HHmmss'"') do set TIMESTAMP=%%I
-set "LOG_FILE=logs\instalar_%TIMESTAMP%.log"
+set "LOG_FILE=%LOG_DIR%\instalar_completo_%TIMESTAMP%.log"
 
-:: Iniciar arquivo de log
 echo ============================================================ > "%LOG_FILE%"
-echo   LOG DE INSTALACAO - %TIMESTAMP% >> "%LOG_FILE%"
+echo   LOG INSTALADOR COMPLETO - %TIMESTAMP% >> "%LOG_FILE%"
 echo ============================================================ >> "%LOG_FILE%"
-echo. >> "%LOG_FILE%"
 
+:: ==============================================================================
+:: 1. RESOLVER INSTALL_DIR DINAMICAMENTE (MEUS DOCUMENTOS)
+:: ==============================================================================
+for /f "delims=" %%i in ('powershell -Command "[Environment]::GetFolderPath([Environment+SpecialFolder]::MyDocuments)"') do set "MY_DOCS=%%i"
+if "%MY_DOCS%"=="" set "MY_DOCS=%USERPROFILE%\Documents"
+set "INSTALL_DIR=%MY_DOCS%\Disparador de e-mails"
+
+echo "%INSTALL_DIR%" | findstr /I "OneDrive" >nul
+if errorlevel 1 goto :sem_onedrive
 echo.
-echo ============================================================
-echo   INSTALADOR - DISPARADOR DE E-MAILS CP FANI
-echo ============================================================
-echo Log desta execucao: %LOG_FILE%
+echo AVISO: Sua pasta Documentos esta no OneDrive:
+echo %INSTALL_DIR%
 echo.
+echo O OneDrive pode travar arquivos do ambiente virtual e causar erros de acesso.
+echo.
+echo [1] Sim, instalar em Documentos (OneDrive)
+echo [2] Nao, instalar em %USERPROFILE%\Disparador de e-mails
+echo.
+set /p "CHOICE=Escolha (1 ou 2): "
+echo Escolha do usuario: %CHOICE% >> "%LOG_FILE%"
+if "%CHOICE%"=="1" goto :sem_onedrive
+set "INSTALL_DIR=%USERPROFILE%\Disparador de e-mails"
+:sem_onedrive
 
-REM Navegar para o diretorio onde este script esta localizado
-cd /d "%~dp0"
+set "UPDATE_MODE=0"
+if "%~1"=="/atualizar" set "UPDATE_MODE=1"
 
-:: Verificar se Python esta instalado
-echo [1/4] Verificando Python...
-echo [1/4] Verificando Python... >> "%LOG_FILE%"
-python --version >nul 2>&1
-if errorlevel 1 (
-    echo ERRO: Python nao encontrado! >> "%LOG_FILE%"
+echo ============================================================
+echo   INSTALADOR COMPLETO - DISPARADOR DE E-MAILS CP FANI
+echo   Pasta de destino: %INSTALL_DIR%
+echo ============================================================
+echo Log: %LOG_FILE%
+echo.
+echo INSTALL_DIR: %INSTALL_DIR% >> "%LOG_FILE%"
+
+:: ==============================================================================
+:: 2. VERIFICAR/INSTALAR PYTHON 3.12 (64-BIT)
+:: ==============================================================================
+echo [1/6] Verificando Python 3.12...
+set "PY_CMD="
+
+:: Tentar via Python Launcher (py -3.12)
+py -3.12 --version >nul 2>&1
+if not errorlevel 1 (
+    set "PY_CMD=py -3.12"
+    goto :python_encontrado
+)
+
+:: Tentar verificar se o 'python' padrao do sistema e a versao 3.12
+python --version 2>&1 | findstr /C:"3.12" >nul
+if not errorlevel 1 (
+    set "PY_CMD=python"
+    goto :python_encontrado
+)
+
+:: Se Python 3.12 nao for localizado, tenta instalar via winget
+echo Python 3.12 nao encontrado. Tentando instalar via winget...
+winget install --id Python.Python.3.12 -e --scope user --silent --accept-package-agreements --accept-source-agreements >> "%LOG_FILE%" 2>&1
+
+py -3.12 --version >nul 2>&1
+if not errorlevel 1 (
+    set "PY_CMD=py -3.12"
+    goto :python_encontrado
+)
+
+set "PATH=%LOCALAPPDATA%\Programs\Python\Python312;%LOCALAPPDATA%\Programs\Python\Python312\Scripts;%PATH%"
+python --version 2>&1 | findstr /C:"3.12" >nul
+if not errorlevel 1 (
+    set "PY_CMD=python"
+    goto :python_encontrado
+)
+
+echo ERRO: Python 3.12 nao encontrado. >> "%LOG_FILE%"
+echo.
+echo ERRO: O Python 3.12 (64-bit) e necessario para garantir a compatibilidade de wheels.
+echo Por favor, instale o Python 3.12 e execute este instalador novamente.
+pause
+exit /b 1
+
+:python_encontrado
+echo Comando Python selecionado: %PY_CMD%
+echo Python selecionado: %PY_CMD% >> "%LOG_FILE%"
+%PY_CMD% --version >> "%LOG_FILE%" 2>&1
+
+:: ==============================================================================
+:: 3. PREPARAR PASTA (LIMPEZA VERIFICADA) E BAIXAR VIA ZIP
+:: ==============================================================================
+echo.
+echo [2/6] Preparando pasta e baixando arquivos...
+
+if exist "%INSTALL_DIR%\venv" (
+    echo Fazendo backup do ambiente virtual...
+    if exist "%TEMP%\cpfani_venv_backup" rmdir /s /q "%TEMP%\cpfani_venv_backup" 2>nul
+    xcopy "%INSTALL_DIR%\venv" "%TEMP%\cpfani_venv_backup\" /E /I /H /Y >nul
+    echo Backup do venv realizado >> "%LOG_FILE%"
+)
+
+echo Limpando instalacao anterior...
+attrib -R "%INSTALL_DIR%\*.*" /S /D >nul 2>&1
+rmdir /s /q "%INSTALL_DIR%" 2>nul
+if exist "%INSTALL_DIR%" (
+    echo Pasta ainda bloqueada. Encerrando processos Python do aplicativo...
+    echo Primeira tentativa de rmdir falhou; executando taskkill >> "%LOG_FILE%"
+    taskkill /f /im pythonw.exe >nul 2>&1
+    taskkill /f /im python.exe >nul 2>&1
+    timeout /t 3 /nobreak >nul
+    attrib -R "%INSTALL_DIR%\*.*" /S /D >nul 2>&1
+    rmdir /s /q "%INSTALL_DIR%" 2>nul
+)
+if exist "%INSTALL_DIR%" (
+    echo ERRO: nao foi possivel remover %INSTALL_DIR% >> "%LOG_FILE%"
     echo.
-    echo ERRO: Python nao encontrado!
-    echo.
-    echo Por favor, instale o Python 3.10 ou superior:
-    echo https://www.python.org/downloads/
-    echo.
-    echo Durante a instalacao, marque a opcao:
-    echo "Add Python to PATH"
-    echo.
+    echo ERRO: nao foi possivel limpar a pasta de instalacao.
+    echo Feche o aplicativo, o Explorador de Arquivos aberto nesta pasta
+    echo e verifique seu antivirus. Depois tente novamente.
     pause
     exit /b 1
 )
-for /f "tokens=*" %%V in ('python --version 2^>^&1') do echo %%V >> "%LOG_FILE%"
-echo Python encontrado! >> "%LOG_FILE%"
-echo Python encontrado!
-echo.
+mkdir "%INSTALL_DIR%"
+cd /d "%INSTALL_DIR%"
+echo Pasta limpa e recriada com sucesso >> "%LOG_FILE%"
 
-:: Verificar se o ambiente virtual existe
-echo [2/4] Verificando ambiente virtual...
-echo [2/4] Verificando ambiente virtual... >> "%LOG_FILE%"
-if not exist "venv\" (
-    echo Criando ambiente virtual... >> "%LOG_FILE%"
-    echo Criando ambiente virtual...
-    python -m venv venv >> "%LOG_FILE%" 2>&1
-    if errorlevel 1 (
-        echo ERRO: Falha ao criar ambiente virtual! >> "%LOG_FILE%"
-        echo ERRO: Falha ao criar ambiente virtual!
-        pause
-        exit /b 1
-    )
-    echo Ambiente virtual criado com sucesso! >> "%LOG_FILE%"
-    echo Ambiente virtual criado com sucesso!
-) else (
-    echo Ambiente virtual ja existe. >> "%LOG_FILE%"
-    echo Ambiente virtual ja existe.
+echo Baixando pacote do GitHub...
+powershell -Command "Invoke-WebRequest -Uri 'https://github.com/sunstrix/Disparador-de-emails-CP-FANI/archive/refs/heads/main.zip' -OutFile '%TEMP%\cpfani_main.zip' -UseBasicParsing"
+if errorlevel 1 (
+    echo Falha no download do ZIP >> "%LOG_FILE%"
+    echo Falha no download. Verifique sua conexao.
+    pause
+    exit /b 1
 )
-echo.
 
-:: Atualizar pip pelo executavel do venv (SEM activate.bat, conforme convencao)
-echo [3/4] Atualizando pip...
-echo [3/4] Atualizando pip... >> "%LOG_FILE%"
+echo Extraindo arquivos...
+powershell -Command "Expand-Archive -Path '%TEMP%\cpfani_main.zip' -DestinationPath '%TEMP%' -Force"
+if errorlevel 1 (
+    echo Falha ao extrair o ZIP >> "%LOG_FILE%"
+    echo Falha ao extrair os arquivos.
+    pause
+    exit /b 1
+)
+
+move "%TEMP%\Disparador-de-emails-CP-FANI-main\*" "%INSTALL_DIR%" >nul 2>&1
+move "%TEMP%\Disparador-de-emails-CP-FANI-main\.*" "%INSTALL_DIR%" >nul 2>&1
+
+del /F /Q "%TEMP%\cpfani_main.zip" >nul 2>&1
+rmdir /s /q "%TEMP%\Disparador-de-emails-CP-FANI-main" >nul 2>&1
+
+:: ==============================================================================
+:: 4. AMBIENTE VIRTUAL LIMPO + PIP GARANTIDO (PYTHON 3.12)
+:: ==============================================================================
+echo.
+echo [3/6] Configurando ambiente virtual (Python 3.12)...
+cd /d "%INSTALL_DIR%"
+
+if exist "venv" (
+    attrib -R "venv\*.*" /S /D >nul 2>&1
+    rmdir /s /q "venv" 2>nul
+)
+if exist "venv" (
+    echo ERRO: venv antigo nao removido >> "%LOG_FILE%"
+    echo ERRO: nao foi possivel remover o venv antigo.
+    pause
+    exit /b 1
+)
+
+echo Criando ambiente virtual limpo com Python 3.12...
+%PY_CMD% -m venv venv >> "%LOG_FILE%" 2>&1
+if errorlevel 1 (
+    echo Falha ao criar ambiente virtual >> "%LOG_FILE%"
+    echo Falha ao criar ambiente virtual.
+    pause
+    exit /b 1
+)
+
+echo Garantindo pip no ambiente virtual...
+"venv\Scripts\python.exe" -m pip --version >nul 2>&1
+if errorlevel 1 (
+    echo pip ausente no venv; executando ensurepip >> "%LOG_FILE%"
+    "venv\Scripts\python.exe" -m ensurepip --upgrade --default-pip >> "%LOG_FILE%" 2>&1
+)
+"venv\Scripts\python.exe" -m pip --version >nul 2>&1
+if errorlevel 1 (
+    echo ERRO: pip indisponivel no venv >> "%LOG_FILE%"
+    echo ERRO: pip indisponivel no ambiente virtual.
+    pause
+    exit /b 1
+)
+
+echo Instalando dependencias...
 "venv\Scripts\python.exe" -m pip install --upgrade pip --quiet >> "%LOG_FILE%" 2>&1
-if errorlevel 1 (
-    echo ERRO: Falha ao atualizar pip! >> "%LOG_FILE%"
-    echo ERRO: Falha ao atualizar pip!
-    pause
-    exit /b 1
-)
-echo pip atualizado! >> "%LOG_FILE%"
-echo pip atualizado!
-echo.
-
-:: Verificar se requirements.txt existe
-if not exist "requirements.txt" (
-    echo ERRO: Arquivo requirements.txt nao encontrado! >> "%LOG_FILE%"
-    echo.
-    echo ERRO: Arquivo requirements.txt nao encontrado!
-    echo.
-    echo Verifique se voce esta executando este script na pasta correta.
-    echo.
-    pause
-    exit /b 1
-)
-
-echo [4/4] Instalando dependencias do requirements.txt...
-echo [4/4] Instalando dependencias do requirements.txt... >> "%LOG_FILE%"
-echo.
 "venv\Scripts\python.exe" -m pip install -r requirements.txt --quiet >> "%LOG_FILE%" 2>&1
 if errorlevel 1 (
-    echo.
-    echo ERRO: Falha ao instalar dependencias! >> "%LOG_FILE%"
-    echo.
-    echo ERRO: Falha ao instalar dependencias!
-    echo.
-    echo Verifique sua conexao com a internet e tente novamente.
-    echo.
-    echo Log completo salvo em: %LOG_FILE%
+    echo Falha ao instalar dependencias >> "%LOG_FILE%"
+    echo Falha ao instalar dependencias.
     pause
     exit /b 1
 )
 
+:: ==============================================================================
+:: 5. TESTAR VENV / RESTAURAR BACKUP / RECRIAR
+:: ==============================================================================
 echo.
-echo Dependencias instaladas com sucesso! >> "%LOG_FILE%"
-echo Dependencias instaladas com sucesso!
-echo.
+echo [4/6] Testando ambiente virtual...
+call :TESTAR_VENV
+if not errorlevel 1 goto :venv_ok
 
-:: Verificacao final pos-instalacao
-echo Verificacao final dos arquivos criticos...
-echo Verificacao final dos arquivos criticos... >> "%LOG_FILE%"
-set "FALHAS=0"
+echo Venv invalido. Tentando restaurar backup...
+echo Venv invalido; tentando restaurar backup >> "%LOG_FILE%"
+if exist "%TEMP%\cpfani_venv_backup" (
+    attrib -R "venv\*.*" /S /D >nul 2>&1
+    rmdir /s /q "venv" 2>nul
+    xcopy "%TEMP%\cpfani_venv_backup" "venv\" /E /I /H /Y >nul
+    rmdir /s /q "%TEMP%\cpfani_venv_backup" 2>nul
+    call :TESTAR_VENV
+    if not errorlevel 1 goto :venv_ok
+    echo Backup restaurado tambem falhou no teste >> "%LOG_FILE%"
+)
+
+echo Backup indisponivel ou invalido. Recriando venv do zero com Python 3.12...
+echo Recriando venv do zero >> "%LOG_FILE%"
+attrib -R "venv\*.*" /S /D >nul 2>&1
+rmdir /s /q "venv" 2>nul
+%PY_CMD% -m venv venv >> "%LOG_FILE%" 2>&1
+"venv\Scripts\python.exe" -m ensurepip --upgrade --default-pip >> "%LOG_FILE%" 2>&1
+"venv\Scripts\python.exe" -m pip install --upgrade pip --quiet >> "%LOG_FILE%" 2>&1
+"venv\Scripts\python.exe" -m pip install -r requirements.txt --quiet >> "%LOG_FILE%" 2>&1
+call :TESTAR_VENV
+if errorlevel 1 (
+    echo ERRO: venv inutilizavel apos recriacao >> "%LOG_FILE%"
+    echo ERRO: ambiente virtual inutilizavel apos recriacao.
+    pause
+    exit /b 1
+)
+:venv_ok
+echo Ambiente virtual valido. >> "%LOG_FILE%"
+echo Ambiente virtual valido.
+
+:: ==============================================================================
+:: 6. VERIFICACAO FINAL POS-INSTALACAO
+:: ==============================================================================
+echo.
+echo [5/6] Verificacao final...
+set "MISSING=0"
+
 if not exist "main.py" (
-    echo AUSENTE: main.py >> "%LOG_FILE%"
-    echo AUSENTE: main.py
-    set "FALHAS=1"
+    echo ERRO: main.py nao encontrado!
+    echo main.py ausente >> "%LOG_FILE%"
+    set "MISSING=1"
 )
 if not exist "requirements.txt" (
-    echo AUSENTE: requirements.txt >> "%LOG_FILE%"
-    echo AUSENTE: requirements.txt
-    set "FALHAS=1"
+    echo ERRO: requirements.txt nao encontrado!
+    echo requirements.txt ausente >> "%LOG_FILE%"
+    set "MISSING=1"
 )
 if not exist "executar.bat" (
-    echo AUSENTE: executar.bat >> "%LOG_FILE%"
-    echo AUSENTE: executar.bat
-    set "FALHAS=1"
+    echo ERRO: executar.bat nao encontrado!
+    echo executar.bat ausente >> "%LOG_FILE%"
+    set "MISSING=1"
 )
 if not exist "venv\Scripts\pythonw.exe" (
-    echo AUSENTE: venv\Scripts\pythonw.exe >> "%LOG_FILE%"
-    echo AUSENTE: venv\Scripts\pythonw.exe
-    set "FALHAS=1"
+    echo ERRO: venv\Scripts\pythonw.exe nao encontrado!
+    echo pythonw.exe ausente >> "%LOG_FILE%"
+    set "MISSING=1"
 )
-if "%FALHAS%"=="1" (
+if "%MISSING%"=="1" (
     echo.
-    echo AVISO: Um ou mais arquivos criticos ausentes. Verifique o log.
-    echo AVISO: Arquivos criticos ausentes na verificacao final >> "%LOG_FILE%"
-) else (
-    echo Todos os arquivos criticos presentes. >> "%LOG_FILE%"
-    echo Todos os arquivos criticos presentes.
+    echo Arquivos criticos ausentes. Verifique o log.
+    pause
+    exit /b 1
 )
+echo Todos os arquivos criticos presentes. >> "%LOG_FILE%"
+echo Todos os arquivos criticos presentes.
 
+:: ==============================================================================
+:: 7. CRIAR ATALHOS (PER-USER, SEM ADMIN)
+:: ==============================================================================
 echo.
-echo ============================================================ >> "%LOG_FILE%"
-echo   INSTALACAO CONCLUIDA COM SUCESSO! >> "%LOG_FILE%"
-echo ============================================================ >> "%LOG_FILE%"
+echo [6/6] Criando atalhos...
+set "DESKTOP_USER=%USERPROFILE%\Desktop"
+
+powershell -Command "$WshShell = New-Object -ComObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%DESKTOP_USER%\Disparador de E-mails CP Fani.lnk'); $Shortcut.TargetPath = '%INSTALL_DIR%\venv\Scripts\pythonw.exe'; $Shortcut.Arguments = 'main.py'; $Shortcut.WorkingDirectory = '%INSTALL_DIR%'; $Shortcut.IconLocation = 'shell32.dll,134'; $Shortcut.WindowStyle = 7; $Shortcut.Save()"
+echo Atalho criado em: %DESKTOP_USER% >> "%LOG_FILE%"
+
+set "START_MENU=%APPDATA%\Microsoft\Windows\Start Menu\Programs"
+if not exist "%START_MENU%" mkdir "%START_MENU%"
+powershell -Command "$WshShell = New-Object -ComObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%START_MENU%\Disparador de E-mails CP Fani.lnk'); $Shortcut.TargetPath = '%INSTALL_DIR%\venv\Scripts\pythonw.exe'; $Shortcut.Arguments = 'main.py'; $Shortcut.WorkingDirectory = '%INSTALL_DIR%'; $Shortcut.IconLocation = 'shell32.dll,134'; $Shortcut.WindowStyle = 7; $Shortcut.Save()"
+echo Atalho criado no Menu Iniciar >> "%LOG_FILE%"
 
 echo.
 echo ============================================================
 echo   INSTALACAO CONCLUIDA COM SUCESSO!
 echo ============================================================
+echo Pasta de instalacao: %INSTALL_DIR%
+echo Logs: %LOG_DIR%
 echo.
-echo Agora voce pode executar o aplicativo com:
-echo executar.bat
-echo.
-echo Ou diretamente com:
-echo venv\Scripts\python.exe main.py
-echo.
-echo Log completo salvo em: %LOG_FILE%
-echo.
-pause
+echo INSTALACAO CONCLUIDA COM SUCESSO >> "%LOG_FILE%"
+
+if "%UPDATE_MODE%"=="1" (
+    echo Reiniciando o aplicativo...
+    start "" "%INSTALL_DIR%\venv\Scripts\pythonw.exe" "main.py"
+) else (
+    pause
+)
+exit /b 0
+
+:: ==============================================================================
+:: SUBROTINA: TESTA VENV (PYTHON + PIP)
+:: ==============================================================================
+:TESTAR_VENV
+"venv\Scripts\python.exe" --version >nul 2>&1
+if errorlevel 1 exit /b 1
+"venv\Scripts\python.exe" -m pip --version >nul 2>&1
+if errorlevel 1 exit /b 1
+exit /b 0
