@@ -8,6 +8,8 @@
 import os
 import json
 import sys
+import glob
+import tempfile
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 
@@ -17,7 +19,7 @@ from PySide6.QtWidgets import (
     QMessageBox, QSpinBox, QProgressBar, QTextEdit, QTableWidget,
     QTableWidgetItem, QHeaderView, QSplitter, QGroupBox, QFormLayout,
     QMenu, QStatusBar, QApplication, QSystemTrayIcon, QInputDialog,
-    QFrame
+    QFrame, QStyle
 )
 from PySide6.QtGui import QPixmap, QIcon, QAction, QFont, QColor, QCloseEvent
 from PySide6.QtCore import Qt, QTimer, QThread, Signal
@@ -365,7 +367,28 @@ class MainWindow(QMainWindow):
         if self.update_manager:
             self.update_manager.stop_check()
         
+        self._cleanup_temp_images()
         QApplication.quit()
+
+    def _cleanup_temp_images(self):
+        """Expurga imagens temporárias coladas na área de trabalho/editor (Ctrl+V)."""
+        try:
+            temp_dir = tempfile.gettempdir()
+            # Padrões comuns de imagens salvas na pasta temp
+            patterns = [
+                os.path.join(temp_dir, "pasted_img_*.png"),
+                os.path.join(temp_dir, "pasted_img_*.jpg"),
+                os.path.join(temp_dir, "cpfani_temp_*.png")
+            ]
+            for pattern in patterns:
+                for img_path in glob.glob(pattern):
+                    try:
+                        if os.path.exists(img_path):
+                            os.remove(img_path)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
     # ==========================================================================
     # CLOSE EVENT (P0-8)
@@ -385,6 +408,7 @@ class MainWindow(QMainWindow):
         else:
             if self.update_manager:
                 self.update_manager.stop_check()
+            self._cleanup_temp_images()
             event.accept()
 
     # ==========================================================================
@@ -471,7 +495,7 @@ class MainWindow(QMainWindow):
             saved_password = keyring.get_password(KEYRING_SERVICE, "password")
             if saved_password:
                 self.input_password.setText(saved_password)
-        except KeyringError as e:
+        except KeyringError:
             # Backend indisponível ou erro de acesso: ignora silenciosamente
             pass
         except Exception:
@@ -1237,7 +1261,7 @@ class MainWindow(QMainWindow):
             try:
                 self.update_manager.checker.no_update.disconnect(self._show_no_update_message)
                 self.update_manager.checker.check_failed.disconnect(self._show_check_failed_message)
-            except:
+            except Exception:
                 pass
 
     def _on_no_update(self, remote: str):
