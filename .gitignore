@@ -28,3 +28,4 @@ Thumbs.db
 # Permitir pastas vazias de recursos (o .gitkeep dentro delas será versionado)
 !logo/.gitkeep
 !ico/.gitkeep
+app/ui/components.py.bak
