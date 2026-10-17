@@ -52,6 +52,25 @@ def auto_detect_columns(df: pd.DataFrame) -> Dict[str, str]:
     
     return detected
 
+def _clean_cell_value(val: Any) -> str:
+    """
+    Converte um valor de célula do pandas para string limpa, tratando floats
+    terminados em .0 (ex: 123.0 -> "123") e valores NaN/null.
+    """
+    if pd.isna(val) or val is None:
+        return ""
+    
+    val_str = str(val).strip()
+    
+    if val_str.lower() in ('nan', 'none', 'null', '<na>'):
+        return ""
+        
+    # Se for um float terminado em .0 (ex: "12345.0"), remove a parte decimal
+    if re.match(r'^\d+\.0$', val_str):
+        val_str = val_str[:-2]
+        
+    return val_str
+
 def process_contacts(
     df: pd.DataFrame,
     col_codigo: str,
@@ -72,10 +91,10 @@ def process_contacts(
 
     df_clean = df.copy()
     
-    # 1. Tratar nulos e forçar tipo string (evita que "192.713" vire float)
-    df_clean[col_codigo] = df_clean[col_codigo].fillna('').astype(str).str.strip()
-    df_clean[col_nome] = df_clean[col_nome].fillna('').astype(str).str.strip()
-    df_clean[col_email] = df_clean[col_email].fillna('').astype(str).str.strip().str.lower()
+    # 1. Tratar nulos e forçar conversao limpa para string
+    df_clean[col_codigo] = df_clean[col_codigo].apply(_clean_cell_value)
+    df_clean[col_nome] = df_clean[col_nome].apply(_clean_cell_value)
+    df_clean[col_email] = df_clean[col_email].apply(_clean_cell_value).str.lower()
 
     valid_rows = []
     
@@ -83,8 +102,8 @@ def process_contacts(
     for _, row in df_clean.iterrows():
         email = row[col_email]
         
-        # Verificar se está vazio (incluindo a string 'nan' que o pandas às vezes gera)
-        if not email or email == 'nan':
+        # Verificar se está vazio
+        if not email:
             stats['sem_email'] += 1
             continue
             
@@ -119,7 +138,7 @@ def process_contacts(
         if col not in [col_codigo, col_nome, col_email]:
             # Normaliza o nome da coluna para ser uma variável segura (ex: "Tel Celular" -> "tel_celular")
             safe_col_name = re.sub(r'[^a-zA-Z0-9_]', '_', col).lower()
-            df_final[safe_col_name] = df_valid[col]
+            df_final[safe_col_name] = df_valid[col].apply(_clean_cell_value)
 
     return df_final, stats
 
