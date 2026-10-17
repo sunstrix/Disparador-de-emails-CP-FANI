@@ -70,7 +70,7 @@ if not exist "venv\" (
 )
 echo.
 
-:: Atualizar pip (SEM activate.bat, conforme convencao)
+:: Atualizar pip pelo executavel do venv (SEM activate.bat, conforme convencao)
 echo [3/4] Atualizando pip...
 echo [3/4] Atualizando pip... >> "%LOG_FILE%"
 "venv\Scripts\python.exe" -m pip install --upgrade pip --quiet >> "%LOG_FILE%" 2>&1
@@ -99,7 +99,6 @@ if not exist "requirements.txt" (
 echo [4/4] Instalando dependencias do requirements.txt...
 echo [4/4] Instalando dependencias do requirements.txt... >> "%LOG_FILE%"
 echo.
-
 "venv\Scripts\python.exe" -m pip install -r requirements.txt --quiet >> "%LOG_FILE%" 2>&1
 if errorlevel 1 (
     echo.
@@ -119,6 +118,40 @@ echo Dependencias instaladas com sucesso! >> "%LOG_FILE%"
 echo Dependencias instaladas com sucesso!
 echo.
 
+:: Verificacao final pos-instalacao
+echo Verificacao final dos arquivos criticos...
+echo Verificacao final dos arquivos criticos... >> "%LOG_FILE%"
+set "FALHAS=0"
+if not exist "main.py" (
+    echo AUSENTE: main.py >> "%LOG_FILE%"
+    echo AUSENTE: main.py
+    set "FALHAS=1"
+)
+if not exist "requirements.txt" (
+    echo AUSENTE: requirements.txt >> "%LOG_FILE%"
+    echo AUSENTE: requirements.txt
+    set "FALHAS=1"
+)
+if not exist "executar.bat" (
+    echo AUSENTE: executar.bat >> "%LOG_FILE%"
+    echo AUSENTE: executar.bat
+    set "FALHAS=1"
+)
+if not exist "venv\Scripts\pythonw.exe" (
+    echo AUSENTE: venv\Scripts\pythonw.exe >> "%LOG_FILE%"
+    echo AUSENTE: venv\Scripts\pythonw.exe
+    set "FALHAS=1"
+)
+if "%FALHAS%"=="1" (
+    echo.
+    echo AVISO: Um ou mais arquivos criticos ausentes. Verifique o log.
+    echo AVISO: Arquivos criticos ausentes na verificacao final >> "%LOG_FILE%"
+) else (
+    echo Todos os arquivos criticos presentes. >> "%LOG_FILE%"
+    echo Todos os arquivos criticos presentes.
+)
+
+echo.
 echo ============================================================ >> "%LOG_FILE%"
 echo   INSTALACAO CONCLUIDA COM SUCESSO! >> "%LOG_FILE%"
 echo ============================================================ >> "%LOG_FILE%"
