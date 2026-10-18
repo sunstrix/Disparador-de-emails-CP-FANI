@@ -23,7 +23,7 @@ if not exist "main.py" (
     echo [ERRO CRITICO] Arquivo main.py nao encontrado em %CD% >> "%LOG_FILE%"
     echo.
     echo ERRO: Arquivo main.py nao foi encontrado na pasta atual.
-    echo Execute o instalar.bat para reparar a instalacao.
+    echo Execute o instalar_completo.bat para reparar a instalacao.
     echo.
     pause
     exit /b 1
@@ -34,14 +34,14 @@ if not exist "venv\Scripts\python.exe" (
     echo [ERRO CRITICO] venv\Scripts\python.exe nao encontrado em %CD% >> "%LOG_FILE%"
     echo.
     echo ERRO: Ambiente virtual (venv) invalido ou nao encontrado.
-    echo Execute o instalar.bat para reparar o ambiente.
+    echo Execute o instalar_completo.bat para reparar o ambiente.
     echo.
     pause
     exit /b 1
 )
 
-:: 3. Testar se os modulos obrigatorios estao carregando sem erros no venv
-"venv\Scripts\python.exe" -c "import PySide6, pandas, keyring" >> "%LOG_FILE%" 2>&1
+:: 3. Testar se os modulos obrigatorios e o app estao carregando sem erros no venv
+"venv\Scripts\python.exe" -c "import PySide6, pandas, keyring, app.ui.main_window" >> "%LOG_FILE%" 2>&1
 if errorlevel 1 (
     echo [ERRO CRITICO] Falha ao carregar modulos no venv. >> "%LOG_FILE%"
     echo.
@@ -53,7 +53,7 @@ if errorlevel 1 (
     echo.
     "venv\Scripts\python.exe" "main.py"
     echo.
-    echo Por favor, execute o instalar.bat para reinstallar as dependencias.
+    echo Por favor, execute o instalar_completo.bat para reinstalar as dependencias.
     pause
     exit /b 1
 )
