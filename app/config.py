@@ -83,6 +83,7 @@ REPORT_EMAIL = "ti@didier.com.br"
 # Recursos somente leitura
 LOGO_FILE = resource_path(os.path.join("logo", "logo.png"))
 ICON_FILE = resource_path(os.path.join("ico", "icone.ico"))
+ASSETS_DIR = os.path.dirname(LOGO_FILE)
 VERSION_FILE = resource_path("version.txt")
 
 # Dados graváveis (apontam para DATA_DIR em %LOCALAPPDATA%\CPFani)
