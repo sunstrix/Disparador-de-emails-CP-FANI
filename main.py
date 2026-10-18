@@ -67,11 +67,11 @@ def exception_hook(exc_type, exc_value, exc_tb):
     # Chama o hook padrão (encerra o app)
     sys.__excepthook__(exc_type, exc_value, exc_tb)
 
+# Instala o hook global de exceções no nível do módulo para capturar erros durante imports
+sys.excepthook = exception_hook
+
 def main():
     """Função principal que inicializa e executa a aplicação."""
-    
-    # Instala o hook global de exceções (P1-11)
-    sys.excepthook = exception_hook
     
     # Habilita alto DPI para telas de alta resolução
     QApplication.setHighDpiScaleFactorRoundingPolicy(
@@ -112,6 +112,9 @@ def main():
         app_icon = QIcon(ICON_FILE)
         app.setWindowIcon(app_icon)
     
+    # Importa MainWindow após a inicialização do QApplication e do excepthook
+    from app.ui.main_window import MainWindow
+    
     # Cria e exibe a janela principal
     window = MainWindow()
     window.show()
@@ -129,6 +132,4 @@ def main():
     sys.exit(app.exec())
 
 if __name__ == "__main__":
-    # Importa aqui para evitar circular import se main.py for importado
-    from app.ui.main_window import MainWindow
     main()
