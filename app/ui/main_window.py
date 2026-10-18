@@ -410,6 +410,7 @@ class MainWindow(QMainWindow):
                 self.update_manager.stop_check()
             self._cleanup_temp_images()
             event.accept()
+            QApplication.quit()
 
     # ==========================================================================
     # ABA 1: CONFIGURAÇÃO SMTP
