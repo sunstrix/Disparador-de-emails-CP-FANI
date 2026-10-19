@@ -1,14 +1,16 @@
 @echo off
 chcp 65001 >nul
+setlocal EnableExtensions
 title Instalador - Disparador de E-mails CP Fani
 color 0A
+cd /d "%~dp0"
 
 :: ==============================================================================
 :: CONFIGURACAO DE VARIAVEIS E LOGS
 :: ==============================================================================
 set "LOG_DIR=%LOCALAPPDATA%\CPFani\logs"
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
-for /f %%I in ('powershell -Command "Get-Date -Format 'yyyyMMdd_HHmmss'"') do set TIMESTAMP=%%I
+for /f %%I in ('powershell -NoProfile -Command "Get-Date -Format 'yyyyMMdd_HHmmss'"') do set TIMESTAMP=%%I
 set "LOG_FILE=%LOG_DIR%\instalar_%TIMESTAMP%.log"
 
 echo ============================================================ > "%LOG_FILE%"
@@ -18,12 +20,13 @@ echo ============================================================ >> "%LOG_FILE%
 :: ==============================================================================
 :: 1. RESOLVER INSTALL_DIR DINAMICAMENTE (MEUS DOCUMENTOS)
 :: ==============================================================================
-for /f "delims=" %%i in ('powershell -Command "[Environment]::GetFolderPath([Environment+SpecialFolder]::MyDocuments)"') do set "MY_DOCS=%%i"
+for /f "delims=" %%i in ('powershell -NoProfile -ExecutionPolicy Bypass -Command "[System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::MyDocuments)"') do set "MY_DOCS=%%i"
 if "%MY_DOCS%"=="" set "MY_DOCS=%USERPROFILE%\Documents"
 set "INSTALL_DIR=%MY_DOCS%\Disparador de e-mails"
 
 echo "%INSTALL_DIR%" | findstr /I "OneDrive" >nul
 if errorlevel 1 goto :sem_onedrive
+
 echo.
 echo AVISO: Sua pasta Documentos esta no OneDrive:
 echo %INSTALL_DIR%
@@ -37,8 +40,8 @@ set /p "CHOICE=Escolha (1 ou 2): "
 echo Escolha do usuario: %CHOICE% >> "%LOG_FILE%"
 if "%CHOICE%"=="1" goto :sem_onedrive
 set "INSTALL_DIR=%USERPROFILE%\Disparador de e-mails"
-:sem_onedrive
 
+:sem_onedrive
 set "UPDATE_MODE=0"
 if "%~1"=="/atualizar" set "UPDATE_MODE=1"
 
@@ -122,13 +125,12 @@ if exist "%INSTALL_DIR%" (
     for /d %%p in ("%INSTALL_DIR%\*") do rmdir /s /q "%%p" 2>nul
     del /f /q /s "%INSTALL_DIR%\*" >nul 2>&1
 )
-
 if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
 cd /d "%INSTALL_DIR%"
 echo Pasta limpa e recriada com sucesso >> "%LOG_FILE%"
 
 echo Baixando pacote do GitHub...
-powershell -Command "Invoke-WebRequest -Uri 'https://github.com/sunstrix/Disparador-de-emails-CP-FANI/archive/refs/heads/main.zip' -OutFile '%TEMP%\cpfani_main.zip' -UseBasicParsing"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-WebRequest -Uri 'https://github.com/sunstrix/Disparador-de-emails-CP-FANI/archive/refs/heads/main.zip' -OutFile '%TEMP%\cpfani_main.zip' -UseBasicParsing"
 if errorlevel 1 (
     echo Falha no download do ZIP >> "%LOG_FILE%"
     echo Falha no download. Verifique sua conexao.
@@ -138,7 +140,7 @@ if errorlevel 1 (
 
 echo Extraindo arquivos...
 if exist "%TEMP%\cpfani_extracted" rmdir /s /q "%TEMP%\cpfani_extracted" 2>nul
-powershell -Command "Expand-Archive -Path '%TEMP%\cpfani_main.zip' -DestinationPath '%TEMP%\cpfani_extracted' -Force"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Path '%TEMP%\cpfani_main.zip' -DestinationPath '%TEMP%\cpfani_extracted' -Force"
 if errorlevel 1 (
     echo Falha ao extrair o ZIP >> "%LOG_FILE%"
     echo Falha ao extrair os arquivos.
@@ -148,7 +150,6 @@ if errorlevel 1 (
 
 :: Mover todos os arquivos e subpastas recursivamente com Robocopy
 robocopy "%TEMP%\cpfani_extracted\Disparador-de-emails-CP-FANI-main" "%INSTALL_DIR%" /E /MOVE >nul 2>&1
-
 del /F /Q "%TEMP%\cpfani_main.zip" >nul 2>&1
 if exist "%TEMP%\cpfani_extracted" rmdir /s /q "%TEMP%\cpfani_extracted" 2>nul
 
@@ -218,6 +219,7 @@ rmdir /s /q "venv" 2>nul
 "venv\Scripts\python.exe" -m ensurepip --upgrade --default-pip >> "%LOG_FILE%" 2>&1
 "venv\Scripts\python.exe" -m pip install --upgrade pip --quiet >> "%LOG_FILE%" 2>&1
 "venv\Scripts\python.exe" -m pip install -r requirements.txt --quiet >> "%LOG_FILE%" 2>&1
+
 call :TESTAR_VENV
 if errorlevel 1 (
     echo ERRO: venv inutilizavel apos recriacao >> "%LOG_FILE%"
@@ -225,6 +227,7 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
+
 :venv_ok
 echo Ambiente virtual valido. >> "%LOG_FILE%"
 echo Ambiente virtual valido.
@@ -256,12 +259,14 @@ if not exist "venv\Scripts\pythonw.exe" (
     echo pythonw.exe ausente >> "%LOG_FILE%"
     set "MISSING=1"
 )
+
 if "%MISSING%"=="1" (
     echo.
     echo Arquivos criticos ausentes. Verifique o log.
     pause
     exit /b 1
 )
+
 echo Todos os arquivos criticos presentes. >> "%LOG_FILE%"
 echo Todos os arquivos criticos presentes.
 
@@ -271,13 +276,12 @@ echo Todos os arquivos criticos presentes.
 echo.
 echo [6/6] Criando atalhos...
 set "DESKTOP_USER=%USERPROFILE%\Desktop"
-
-powershell -Command "$WshShell = New-Object -ComObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%DESKTOP_USER%\Disparador de E-mails CP Fani.lnk'); $Shortcut.TargetPath = '%INSTALL_DIR%\venv\Scripts\pythonw.exe'; $Shortcut.Arguments = 'main.py'; $Shortcut.WorkingDirectory = '%INSTALL_DIR%'; $Shortcut.IconLocation = 'shell32.dll,134'; $Shortcut.WindowStyle = 7; $Shortcut.Save()"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$WshShell = New-Object -ComObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%DESKTOP_USER%\Disparador de E-mails CP Fani.lnk'); $Shortcut.TargetPath = '%INSTALL_DIR%\venv\Scripts\pythonw.exe'; $Shortcut.Arguments = 'main.py'; $Shortcut.WorkingDirectory = '%INSTALL_DIR%'; $Shortcut.IconLocation = 'shell32.dll,134'; $Shortcut.WindowStyle = 7; $Shortcut.Save()"
 echo Atalho criado em: %DESKTOP_USER% >> "%LOG_FILE%"
 
 set "START_MENU=%APPDATA%\Microsoft\Windows\Start Menu\Programs"
 if not exist "%START_MENU%" mkdir "%START_MENU%"
-powershell -Command "$WshShell = New-Object -ComObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%START_MENU%\Disparador de E-mails CP Fani.lnk'); $Shortcut.TargetPath = '%INSTALL_DIR%\venv\Scripts\pythonw.exe'; $Shortcut.Arguments = 'main.py'; $Shortcut.WorkingDirectory = '%INSTALL_DIR%'; $Shortcut.IconLocation = 'shell32.dll,134'; $Shortcut.WindowStyle = 7; $Shortcut.Save()"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$WshShell = New-Object -ComObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%START_MENU%\Disparador de E-mails CP Fani.lnk'); $Shortcut.TargetPath = '%INSTALL_DIR%\venv\Scripts\pythonw.exe'; $Shortcut.Arguments = 'main.py'; $Shortcut.WorkingDirectory = '%INSTALL_DIR%'; $Shortcut.IconLocation = 'shell32.dll,134'; $Shortcut.WindowStyle = 7; $Shortcut.Save()"
 echo Atalho criado no Menu Iniciar >> "%LOG_FILE%"
 
 echo.
