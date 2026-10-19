@@ -22,22 +22,21 @@ def prevent_sleep(keep_display_on: bool = False) -> bool:
     Retorna True se a chamada foi realizada com sucesso.
     """
     global _is_preventing_sleep
-
     if sys.platform != "win32":
         return False
-
+    
     try:
         flags = ES_CONTINUOUS | ES_SYSTEM_REQUIRED
         if keep_display_on:
             flags |= ES_DISPLAY_REQUIRED
-
+        
         result = ctypes.windll.kernel32.SetThreadExecutionState(flags)
         if result != 0:
             _is_preventing_sleep = True
             return True
     except Exception:
         pass
-
+    
     return False
 
 
@@ -48,17 +47,16 @@ def allow_sleep() -> bool:
     Retorna True se a restauração foi realizada com sucesso.
     """
     global _is_preventing_sleep
-
     if sys.platform != "win32":
         return False
-
+    
     try:
         result = ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS)
         _is_preventing_sleep = False
         return result != 0
     except Exception:
         pass
-
+    
     return False
 
 
