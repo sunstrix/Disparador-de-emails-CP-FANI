@@ -11,6 +11,7 @@ from typing import Dict, List, Any
 
 from app.config import FALLBACK_NOME
 
+
 def normalize_key(key: str) -> str:
     """
     Normaliza o nome de uma coluna para ser usado como chave de variável.
@@ -18,14 +19,17 @@ def normalize_key(key: str) -> str:
     """
     if not isinstance(key, str):
         return ""
+    
     # Remove acentos
     key = ''.join(
         c for c in unicodedata.normalize('NFKD', key)
         if unicodedata.category(c) != 'Mn'
     )
+    
     # Minúsculas e substitui espaços/caracteres especiais por underscore
     key = re.sub(r'[^a-z0-9]+', '_', key.lower()).strip('_')
     return key
+
 
 def extract_first_name(full_name: str, use_two_names: bool = False) -> str:
     """
@@ -47,6 +51,7 @@ def extract_first_name(full_name: str, use_two_names: bool = False) -> str:
     # Capitaliza cada parte (ex: "MARIA" -> "Maria", "da" -> "Da")
     return " ".join(part.capitalize() for part in selected_parts)
 
+
 def format_full_name(full_name: str) -> str:
     """
     Formata o nome completo com capitalização de título.
@@ -55,6 +60,7 @@ def format_full_name(full_name: str) -> str:
         return ""
     return full_name.strip().title()
 
+
 def _clean_val(val: Any) -> str:
     """
     Auxiliar para limpar e converter valores de variáveis,
@@ -62,16 +68,20 @@ def _clean_val(val: Any) -> str:
     """
     if val is None:
         return ""
+    
     val_str = str(val).strip()
     if val_str.lower() in ('nan', 'none', 'null', '<na>'):
         return ""
+    
     if re.match(r'^\d+\.0$', val_str):
         val_str = val_str[:-2]
+    
     return val_str
 
+
 def render_template(
-    text: str, 
-    row_data: Dict[str, Any], 
+    text: str,
+    row_data: Dict[str, Any],
     fallback: str = FALLBACK_NOME,
     use_two_names: bool = False
 ) -> str:
@@ -83,42 +93,55 @@ def render_template(
     """
     if not text or not isinstance(text, str):
         return text
-
+    
     # Prepara um dicionário de chaves normalizadas para busca rápida
     normalized_row = {
         normalize_key(k): _clean_val(v) 
         for k, v in row_data.items() 
         if v is not None
     }
-
+    
     def replacer(match: re.Match) -> str:
         var_raw = match.group(1).strip()
         var_key = normalize_key(var_raw)
-
+        
         # Tratamento especial para primeiro_nome
         if var_key == "primeiro_nome":
-            full_name = normalized_row.get("nome", "")
+            # Busca por colunas que contenham "nome" (nome, nome_completo, etc)
+            full_name = ""
+            for key in normalized_row:
+                if "nome" in key and "primeiro" not in key:
+                    full_name = normalized_row[key]
+                    break
+            
             val = extract_first_name(full_name, use_two_names=use_two_names)
             return html.escape(val) if val else html.escape(fallback)
-
+        
         # Tratamento especial para nome_completo
         if var_key == "nome_completo":
-            full_name = normalized_row.get("nome", "")
+            # Busca por colunas que contenham "nome"
+            full_name = ""
+            for key in normalized_row:
+                if "nome" in key and "primeiro" not in key:
+                    full_name = normalized_row[key]
+                    break
+            
             val = format_full_name(full_name)
             return html.escape(val) if val else html.escape(fallback)
-
+        
         # Busca normal na planilha
         val = normalized_row.get(var_key, "")
         
         # Se estiver vazio ou for nulo/nan
         if not val or val.lower() in ('nan', 'none', 'null', '<na>'):
             return html.escape(fallback)
-            
+        
         # Escapa o valor para evitar injeção de HTML acidental (P1-2)
         return html.escape(val)
-
+    
     # Substitui todas as ocorrências de {{ ... }}
     return re.sub(r'\{\{\s*([\w\W]+?)\s*\}\}', replacer, text)
+
 
 def validate_variables(text: str, available_columns: List[str]) -> List[str]:
     """
@@ -127,7 +150,7 @@ def validate_variables(text: str, available_columns: List[str]) -> List[str]:
     """
     if not text or not isinstance(text, str):
         return []
-
+    
     # Extrai todas as variáveis do texto
     used_vars = set(re.findall(r'\{\{\s*([\w\W]+?)\s*\}\}', text))
     
@@ -137,10 +160,10 @@ def validate_variables(text: str, available_columns: List[str]) -> List[str]:
     # Adiciona variáveis especiais que são tratadas internamente
     normalized_cols.add("primeiro_nome")
     normalized_cols.add("nome_completo")
-
+    
     missing = []
     for var in used_vars:
         if normalize_key(var) not in normalized_cols:
             missing.append(var)
-            
+    
     return missing
