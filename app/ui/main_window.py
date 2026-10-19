@@ -30,7 +30,7 @@ from keyring.errors import PasswordDeleteError, KeyringError
 from app.config import (
     APP_TITLE, APP_VERSION, MAX_DAILY_LIMIT, DEFAULT_DAILY_LIMIT,
     MIN_INTERVAL_SECONDS, MAX_INTERVAL_SECONDS, SMTP_SERVERS,
-    REPORT_EMAIL, LOGO_FILE, FALLBACK_NOME, LOGS_DIR, ICON_FILE
+    REPORT_EMAIL, LOGO_FILE, FALLBACK_NOME, LOGS_DIR
 )
 from app.core.importer import load_contacts, process_contacts
 from app.core.template_engine import render_template, validate_variables
@@ -43,19 +43,17 @@ from app.ui.styles import get_stylesheet
 
 KEYRING_SERVICE = "DisparadorCPFani"
 
-
 # ==============================================================================
 # WORKERS PARA TESTES (P1-1: não bloqueiam a UI)
 # ==============================================================================
-
 class SMTPTestWorker(QThread):
     """Worker para testar conexão SMTP em background."""
     finished = Signal(bool, str)
-    
+
     def __init__(self, smtp_config: dict):
         super().__init__()
         self.smtp_config = smtp_config
-        
+
     def run(self):
         try:
             client = SMTPClient(
@@ -70,11 +68,10 @@ class SMTPTestWorker(QThread):
         except Exception as e:
             self.finished.emit(False, str(e))
 
-
 class TestEmailWorker(QThread):
     """Worker para enviar e-mail de teste em background."""
     finished = Signal(bool, str)
-    
+
     def __init__(self, smtp_config: dict, to_email: str, to_name: str, 
                  subject: str, html_body: str, text_body: str):
         super().__init__()
@@ -84,7 +81,7 @@ class TestEmailWorker(QThread):
         self.subject = subject
         self.html_body = html_body
         self.text_body = text_body
-        
+
     def run(self):
         try:
             client = SMTPClient(
@@ -102,17 +99,16 @@ class TestEmailWorker(QThread):
         except Exception as e:
             self.finished.emit(False, str(e))
 
-
 class ReportWorker(QThread):
     """Worker para enviar relatório final em background (P0-9)."""
     finished = Signal(bool, str)
-    
+
     def __init__(self, logger: CampaignLogger, summary: dict, smtp_config: dict):
         super().__init__()
         self.logger = logger
         self.summary = summary
         self.smtp_config = smtp_config
-        
+
     def run(self):
         try:
             success, message = self.logger.send_final_report(self.summary, self.smtp_config)
@@ -120,21 +116,19 @@ class ReportWorker(QThread):
         except Exception as e:
             self.finished.emit(False, str(e))
 
-
 # ==============================================================================
 # JANELA PRINCIPAL
 # ==============================================================================
-
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(f"{APP_TITLE} v{APP_VERSION}")
         self.resize(1100, 750)
         self.setMinimumSize(900, 600)
-        
+
         # Aplica o stylesheet global (Parte 3C)
         self.setStyleSheet(get_stylesheet())
-        
+
         # Estado interno
         self.df_raw = None
         self.df_clean = None
@@ -145,22 +139,22 @@ class MainWindow(QMainWindow):
         self.worker: Optional[SenderWorker] = None
         self.logger: Optional[CampaignLogger] = None
         self.smtp_config = {}
-        
+
         # Workers de teste (P1-1)
         self.test_worker: Optional[SMTPTestWorker] = None
         self.test_email_worker: Optional[TestEmailWorker] = None
         self.report_worker: Optional[ReportWorker] = None
-        
+
         # Gerenciador de atualização (Parte 4E)
         self.update_manager = UpdateManager()
-        
+
         # Bandeja do sistema (Parte 3B)
         self.tray_icon: Optional[QSystemTrayIcon] = None
-        
+
         self._init_ui()
         self._create_tray_icon()
         self._load_smtp_credentials()
-        
+
         # Inicia verificação de atualização em background (Parte 4E)
         self.update_manager.start_check()
 
@@ -176,35 +170,34 @@ class MainWindow(QMainWindow):
 
         # Cabeçalho com Logo, Título e Versão (Parte 3C)
         header_layout = QHBoxLayout()
-        
         self.logo_label = QLabel()
         self.logo_label.setFixedSize(80, 80)
         self.logo_label.setAlignment(Qt.AlignCenter)
         self._load_logo()
         header_layout.addWidget(self.logo_label)
-        
+
         title_layout = QVBoxLayout()
         self.title_label = QLabel(APP_TITLE)
         self.title_label.setObjectName("title_label")
         self.title_label.setAlignment(Qt.AlignLeft)
         title_layout.addWidget(self.title_label)
-        
+
         self.version_label = QLabel(f"Versão {APP_VERSION}")
         self.version_label.setObjectName("version_label")
         self.version_label.setAlignment(Qt.AlignLeft)
         title_layout.addWidget(self.version_label)
-        
+
         header_layout.addLayout(title_layout)
         header_layout.addStretch()
-        
+
         # Botão de verificação manual de atualização (Parte 4E)
         self.btn_check_update = QPushButton("Verificar atualização")
         self.btn_check_update.setProperty("outline", True)
         self.btn_check_update.clicked.connect(self._manual_check_update)
         header_layout.addWidget(self.btn_check_update)
-        
+
         main_layout.addLayout(header_layout)
-        
+
         # Faixa de atualização (Parte 4E)
         self._create_update_banner()
         main_layout.addWidget(self.update_banner)
@@ -229,7 +222,7 @@ class MainWindow(QMainWindow):
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage("Pronto. Configure o SMTP para começar.")
-        
+
         # Conecta sinais do UpdateManager (Parte 4E)
         if self.update_manager.checker:
             self.update_manager.checker.update_available.connect(self._on_update_available)
@@ -244,6 +237,7 @@ class MainWindow(QMainWindow):
                     pixmap.scaled(80, 80, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                 )
                 return
+        
         # Fallback
         self.logo_label.setText("CP\nFANI")
         self.logo_label.setFont(QFont("Arial", 16, QFont.Bold))
@@ -261,21 +255,21 @@ class MainWindow(QMainWindow):
             }
         """)
         self.update_banner.setVisible(False)
-        
+
         layout = QHBoxLayout(self.update_banner)
         layout.setContentsMargins(10, 5, 10, 5)
-        
+
         self.update_label = QLabel("Nova versão disponível!")
         self.update_label.setStyleSheet("color: #2E7D32; font-weight: bold;")
         layout.addWidget(self.update_label)
-        
+
         layout.addStretch()
-        
+
         btn_update = QPushButton("Atualizar agora")
         btn_update.setProperty("primary", True)
         btn_update.clicked.connect(self._on_update_now)
         layout.addWidget(btn_update)
-        
+
         btn_later = QPushButton("Depois")
         btn_later.setProperty("outline", True)
         btn_later.clicked.connect(self._on_update_later)
@@ -288,44 +282,42 @@ class MainWindow(QMainWindow):
         """Cria o ícone da bandeja do sistema com menu."""
         if not QSystemTrayIcon.isSystemTrayAvailable():
             return
-            
+
         self.tray_icon = QSystemTrayIcon(self)
-        
-        # Ícone: preferir .ico, fallback para .png
-        if os.path.exists(ICON_FILE):
-            icon = QIcon(ICON_FILE)
-        elif os.path.exists(LOGO_FILE):
+
+        # Ícone: usar LOGO_FILE ou fallback para ícone padrão
+        if os.path.exists(LOGO_FILE):
             icon = QIcon(LOGO_FILE)
         else:
             icon = self.style().standardIcon(QStyle.SP_ComputerIcon)
-            
+
         self.tray_icon.setIcon(icon)
         self.tray_icon.setToolTip(f"{APP_TITLE} v{APP_VERSION}")
-        
+
         # Menu da bandeja
         tray_menu = QMenu()
         
         open_action = QAction("Abrir janela", self)
         open_action.triggered.connect(self.show_from_tray)
         tray_menu.addAction(open_action)
-        
+
         self.pause_resume_action = QAction("Pausar", self)
         self.pause_resume_action.triggered.connect(self._toggle_pause_from_tray)
         self.pause_resume_action.setEnabled(False)
         tray_menu.addAction(self.pause_resume_action)
-        
+
         tray_menu.addSeparator()
-        
+
         self.status_action = QAction("Status: Aguardando", self)
         self.status_action.setEnabled(False)
         tray_menu.addAction(self.status_action)
-        
+
         tray_menu.addSeparator()
-        
+
         exit_action = QAction("Sair", self)
         exit_action.triggered.connect(self._exit_from_tray)
         tray_menu.addAction(exit_action)
-        
+
         self.tray_icon.setContextMenu(tray_menu)
         self.tray_icon.activated.connect(self._on_tray_activated)
         self.tray_icon.show()
@@ -363,7 +355,7 @@ class MainWindow(QMainWindow):
                 return
             self.worker.stop()
             self.worker.wait(5000)
-        
+
         if self.update_manager:
             self.update_manager.stop_check()
         
@@ -544,7 +536,7 @@ class MainWindow(QMainWindow):
         self.btn_test_connection.setEnabled(False)
         self.btn_test_connection.setText("Testando...")
         self.status_bar.showMessage("Testando conexão SMTP...")
-        
+
         self.test_worker = SMTPTestWorker(config)
         self.test_worker.finished.connect(self._on_test_connection_finished)
         self.test_worker.start()
@@ -553,7 +545,7 @@ class MainWindow(QMainWindow):
         """Callback do teste de conexão."""
         self.btn_test_connection.setEnabled(True)
         self.btn_test_connection.setText("Testar Conexão")
-        
+
         if success:
             QMessageBox.information(self, "Sucesso", message)
             self._save_smtp_credentials()
@@ -631,10 +623,9 @@ class MainWindow(QMainWindow):
 
         # Limpa estado anterior (P0-6)
         self._clear_contacts_state()
-        
         self.current_file_path = file_path
-        df, result = load_contacts(file_path)
 
+        df, result = load_contacts(file_path)
         if not result["success"]:
             QMessageBox.critical(self, "Erro", result["error_message"])
             return
@@ -657,12 +648,12 @@ class MainWindow(QMainWindow):
         """Troca de aba com limpeza de estado (P0-6)."""
         if not self.current_file_path or not sheet_name:
             return
-        
+
         # Limpa estado anterior
         self.df_clean = None
         self.contacts_stats = {}
         self.contacts_table.clear()
-        
+
         df, result = load_contacts(self.current_file_path, sheet_name)
         if result["success"]:
             self.df_raw = df
@@ -678,7 +669,7 @@ class MainWindow(QMainWindow):
     def _update_column_combos(self):
         if self.df_raw is None:
             return
-
+        
         cols = list(self.df_raw.columns)
         for combo in [self.combo_col_codigo, self.combo_col_nome, self.combo_col_email]:
             combo.clear()
@@ -707,7 +698,6 @@ class MainWindow(QMainWindow):
         self.df_clean, self.contacts_stats = process_contacts(
             self.df_raw, col_codigo, col_nome, col_email
         )
-
         self.contacts_table.load_data(self.df_clean, self.contacts_stats)
 
         if self.contacts_stats["validos"] == 0:
@@ -742,7 +732,6 @@ class MainWindow(QMainWindow):
 
         # Botões de ação
         btn_layout = QHBoxLayout()
-
         self.btn_insert_var_body = QPushButton("Inserir Variável ▼")
         self.btn_insert_var_body.clicked.connect(lambda: self._show_variables_menu(self.editor.text_edit))
         btn_layout.addWidget(self.btn_insert_var_body)
@@ -760,7 +749,6 @@ class MainWindow(QMainWindow):
         btn_layout.addWidget(self.btn_load_template)
 
         layout.addLayout(btn_layout)
-
         return widget
 
     def _show_variables_menu(self, target_widget):
@@ -827,7 +815,7 @@ class MainWindow(QMainWindow):
         if not templates:
             QMessageBox.information(self, "Aviso", "Nenhum modelo salvo ainda.")
             return
-        
+
         name, ok = QInputDialog.getItem(
             self, "Carregar Modelo", "Selecione um modelo:", 
             templates, 0, False
@@ -882,6 +870,7 @@ class MainWindow(QMainWindow):
         # E-mail de teste
         test_group = QGroupBox("Enviar E-mail de Teste")
         test_layout = QHBoxLayout()
+
         self.input_test_email = QLineEdit()
         self.input_test_email.setPlaceholderText("seuemail@teste.com")
         test_layout.addWidget(self.input_test_email)
@@ -889,6 +878,7 @@ class MainWindow(QMainWindow):
         self.btn_send_test = QPushButton("Enviar Teste")
         self.btn_send_test.clicked.connect(self._send_test_email)
         test_layout.addWidget(self.btn_send_test)
+
         test_group.setLayout(test_layout)
         layout.addWidget(test_group)
 
@@ -952,7 +942,7 @@ class MainWindow(QMainWindow):
         test_contact = self.df_clean.iloc[0].to_dict()
         test_contact["EMail"] = test_email
         test_contact["Nome"] = "Teste"
-        
+
         subject = render_template(self.input_subject.text(), test_contact)
         html = render_template(self.editor.to_html(), test_contact)
         text = render_template(self.editor.to_plain_text(), test_contact)
@@ -960,7 +950,7 @@ class MainWindow(QMainWindow):
         self.btn_send_test.setEnabled(False)
         self.btn_send_test.setText("Enviando...")
         self.status_bar.showMessage("Enviando e-mail de teste...")
-        
+
         self.test_email_worker = TestEmailWorker(
             config, test_email, "Teste", subject, html, text
         )
@@ -971,7 +961,7 @@ class MainWindow(QMainWindow):
         """Callback do envio de teste."""
         self.btn_send_test.setEnabled(True)
         self.btn_send_test.setText("Enviar Teste")
-        
+
         if success:
             QMessageBox.information(self, "Sucesso", f"E-mail de teste enviado. {message}")
             self.status_bar.showMessage("E-mail de teste enviado com sucesso.")
@@ -992,6 +982,7 @@ class MainWindow(QMainWindow):
         missing_subject = validate_variables(self.input_subject.text(), list(self.df_clean.columns))
         missing_body = validate_variables(self.editor.to_plain_text(), list(self.df_clean.columns))
         missing = set(missing_subject + missing_body)
+
         if missing:
             reply = QMessageBox.question(
                 self, "Variáveis inválidas",
@@ -1020,7 +1011,6 @@ class MainWindow(QMainWindow):
         self.logger = CampaignLogger()
 
         contacts_list = self.df_clean.to_dict(orient="records")
-
         self.worker = SenderWorker(
             contacts=contacts_list,
             subject=self.input_subject.text(),
@@ -1046,7 +1036,7 @@ class MainWindow(QMainWindow):
 
         self._set_sending_ui_state(True)
         self.worker.start()
-        
+
         # Oculta para bandeja (Parte 3B)
         if self.tray_icon and QSystemTrayIcon.isSystemTrayAvailable():
             self.hide()
@@ -1087,7 +1077,7 @@ class MainWindow(QMainWindow):
         total = sent + failed + remaining
         self.progress_bar.setMaximum(total)
         self.progress_bar.setValue(sent + failed)
-        
+
         # Formata tempo estimado
         if estimated_time > 0:
             minutes = int(estimated_time // 60)
@@ -1095,11 +1085,11 @@ class MainWindow(QMainWindow):
             time_str = f"{minutes}m {seconds}s"
         else:
             time_str = "calculando..."
-        
+
         self.label_progress.setText(
             f"Enviados: {sent} | Falhas: {failed} | Restantes: {remaining} | Tempo estimado: {time_str}"
         )
-        
+
         # Atualiza bandeja
         if self.tray_icon:
             self.tray_icon.setToolTip(f"{APP_TITLE}: {sent}/{total} enviados")
@@ -1113,6 +1103,7 @@ class MainWindow(QMainWindow):
         # Atualiza tabela de log na UI (P1-5: 6 colunas)
         row_count = self.log_table.rowCount()
         self.log_table.insertRow(row_count)
+        
         self.log_table.setItem(row_count, 0, QTableWidgetItem(entry.get("data_hora", "")))
         self.log_table.setItem(row_count, 1, QTableWidgetItem(entry.get("codigo", "")))
         self.log_table.setItem(row_count, 2, QTableWidgetItem(entry.get("destinatario", "")))
@@ -1135,20 +1126,20 @@ class MainWindow(QMainWindow):
     def _on_finished_sending(self, summary: dict):
         self._set_sending_ui_state(False)
         self.progress_bar.setValue(self.progress_bar.maximum())
-        
+
         # Atualiza bandeja
         if self.update_manager:
             self.update_manager.set_sending_active(False)
         if self.tray_icon and self.pause_resume_action:
             self.pause_resume_action.setEnabled(False)
             self.pause_resume_action.setText("Pausar")
-        
+
         # Envia relatório em background (P0-9)
         if self.logger:
             self.report_worker = ReportWorker(self.logger, summary, self.smtp_config)
             self.report_worker.finished.connect(self._on_report_finished)
             self.report_worker.start()
-        
+
         # Notificação na bandeja (Parte 3B)
         if self.tray_icon and self.isHidden():
             self.tray_icon.showMessage(
@@ -1229,7 +1220,7 @@ class MainWindow(QMainWindow):
         self.btn_check_update.setEnabled(False)
         self.btn_check_update.setText("Verificando...")
         self.status_bar.showMessage("Verificando atualização...")
-        
+
         if self.update_manager:
             self.update_manager.start_check()
             # Conecta temporariamente para mostrar resultado
@@ -1256,7 +1247,7 @@ class MainWindow(QMainWindow):
         self.update_label.setText(f"Nova versão {remote} disponível (instalada: {local})")
         self.update_banner.setVisible(True)
         self.update_manager.on_update_available(remote, local)
-        
+
         # Desconecta sinais temporários de verificação manual
         if self.update_manager.checker:
             try:
@@ -1279,7 +1270,7 @@ class MainWindow(QMainWindow):
                 "Há um envio em andamento. A atualização será oferecida novamente ao final do disparo."
             )
             return
-        
+
         reply = QMessageBox.question(
             self, "Confirmar atualização",
             f"O aplicativo será fechado e a pasta de instalação será atualizada.\n"
@@ -1288,7 +1279,7 @@ class MainWindow(QMainWindow):
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.Yes
         )
-        
+
         if reply == QMessageBox.Yes:
             success, message = self.update_manager.apply_update()
             if success:
