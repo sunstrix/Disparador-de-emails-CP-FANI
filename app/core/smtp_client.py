@@ -24,11 +24,11 @@ from app.config import SMTP_SERVERS
 
 class SMTPClient:
     def __init__(
-        self, 
-        provider: str, 
-        email: str, 
-        password: str, 
-        port: int, 
+        self,
+        provider: str,
+        email: str,
+        password: str,
+        port: int,
         security: str,
         reply_to: Optional[str] = None,
         list_unsubscribe: Optional[str] = None
@@ -40,8 +40,8 @@ class SMTPClient:
         self.security = security
         self.reply_to = reply_to
         self.list_unsubscribe = list_unsubscribe
-        self.server_config = SMTP_SERVERS.get(provider)
         
+        self.server_config = SMTP_SERVERS.get(provider)
         if not self.server_config:
             raise ValueError(f"Provedor '{provider}' não suportado.")
             
@@ -60,7 +60,7 @@ class SMTPClient:
             except Exception:
                 # Conexão caiu, limpa para forçar reconexão
                 self.server = None
-
+                
         try:
             self.server = self._create_server()
             return True, "Conexão e autenticação bem-sucedidas!"
@@ -112,7 +112,6 @@ class SMTPClient:
                     last_error = msg
                     if "autenticação" in msg.lower() or "535" in msg:
                         return False, msg
-                    
                     if attempt < retry_count - 1:
                         self._backoff_sleep(2 ** attempt)
                     continue
@@ -120,20 +119,19 @@ class SMTPClient:
                 # Monta e envia a mensagem
                 msg_obj = self._build_message(to_email, to_name, subject, html_body, text_body)
                 self.server.send_message(msg_obj)
-                
                 return True, "Enviado com sucesso"
-
+                
             except smtplib.SMTPAuthenticationError as e:
                 code = getattr(e, 'smtp_code', 535)
                 msg_text = e.smtp_error.decode('utf-8', errors='replace') if isinstance(getattr(e, 'smtp_error', ''), bytes) else str(e)
                 return False, f"Falha de autenticação ({code}): {msg_text}"
-
+                
             except smtplib.SMTPRecipientsRefused as e:
                 return False, f"E-mail do destinatário recusado pelo servidor: {e}"
-
+                
             except smtplib.SMTPSenderRefused as e:
                 return False, f"Endereço do remetente recusado pelo servidor: {e}"
-
+                
             except smtplib.SMTPDataError as e:
                 code = getattr(e, 'smtp_code', 500)
                 msg_text = e.smtp_error.decode('utf-8', errors='replace') if isinstance(getattr(e, 'smtp_error', ''), bytes) else str(e)
@@ -141,7 +139,7 @@ class SMTPClient:
                     return False, f"Erro permanente do servidor ({code}): {msg_text}"
                 last_error = f"Erro temporário do servidor ({code}): {msg_text}"
                 self.server = None
-
+                
             except smtplib.SMTPResponseException as e:
                 code = getattr(e, 'smtp_code', 500)
                 msg_text = e.smtp_error.decode('utf-8', errors='replace') if isinstance(getattr(e, 'smtp_error', ''), bytes) else str(e)
@@ -149,18 +147,18 @@ class SMTPClient:
                     return False, f"Erro permanente no servidor ({code}): {msg_text}"
                 last_error = f"Erro no servidor ({code}): {msg_text}"
                 self.server = None
-
+                
             except (smtplib.SMTPServerDisconnected, OSError, ssl.SSLError, TimeoutError) as e:
                 last_error = f"Falha na conexão SMTP: {str(e)}"
                 self.server = None
-
+                
             except Exception as e:
                 last_error = f"Erro inesperado: {str(e)}"
                 self.server = None
 
             if attempt < retry_count - 1:
                 self._backoff_sleep(2 ** attempt)
-
+                
         return False, f"Falha após {retry_count} tentativas: {last_error}"
 
     def _backoff_sleep(self, seconds: float):
@@ -172,7 +170,6 @@ class SMTPClient:
     def _create_server(self) -> smtplib.SMTP:
         """Cria e autentica a conexão com o servidor SMTP com timeout estipulado em 30 segundos."""
         host = self.server_config["host"]
-        
         if self.security == "SSL":
             context = ssl.create_default_context()
             server = smtplib.SMTP_SSL(host, self.port, context=context, timeout=30)
@@ -196,7 +193,6 @@ class SMTPClient:
         Extrai imagens do HTML e as anexa como inline (CID).
         """
         msg = MIMEMultipart("related")
-        
         msg["Subject"] = Header(subject, "utf-8")
         msg["From"] = formataddr(("CP Fani", self.email))
         msg["To"] = formataddr((to_name, to_email))
@@ -215,7 +211,6 @@ class SMTPClient:
         
         html_processed, images = self._process_inline_images(html_body)
         alt_part.attach(MIMEText(html_processed, "html", "utf-8"))
-        
         msg.attach(alt_part)
 
         for cid, img_path in images.items():
@@ -224,17 +219,15 @@ class SMTPClient:
                     mime_type, _ = mimetypes.guess_type(img_path)
                     mime_type = mime_type or "application/octet-stream"
                     maintype, subtype = mime_type.split("/", 1)
-                    
                     if maintype == "image":
                         img = MIMEImage(f.read(), _subtype=subtype)
                     else:
                         img = MIMEBase(maintype, subtype)
                         img.set_payload(f.read())
-                        
                     img.add_header("Content-ID", f"<{cid}>")
                     img.add_header("Content-Disposition", "inline", filename=os.path.basename(img_path))
                     msg.attach(img)
-
+                    
         return msg
 
     def _process_inline_images(self, html_body: str) -> Tuple[str, Dict[str, str]]:
@@ -244,26 +237,24 @@ class SMTPClient:
         """
         path_to_cid = {}
         cid_to_path = {}
-        
         pattern = re.compile(r'(<img[^>]*?\bsrc=["\'])([^"\']+)(["\'][^>]*>)', re.IGNORECASE)
-        
+
         def replacer(match: re.Match) -> str:
             prefix = match.group(1)
             src = match.group(2)
             suffix = match.group(3)
-            
+
             if src.startswith(("http://", "https://", "data:")):
                 return match.group(0)
-                
+
             clean_src = urllib.parse.unquote(src)
-            
             if clean_src.startswith("file:///"):
                 clean_src = clean_src[8:]
             elif clean_src.startswith("file://"):
                 clean_src = clean_src[7:]
                 
             clean_src = os.path.normpath(clean_src)
-            
+
             if clean_src in path_to_cid:
                 cid = path_to_cid[clean_src]
             else:
@@ -283,15 +274,13 @@ class SMTPClient:
 
             attrs_lower = attrs.lower()
             extra_attrs = ""
-            
             if "width=" not in attrs_lower:
                 extra_attrs += ' width="100%"'
-                
             if "style=" not in attrs_lower:
                 extra_attrs += ' style="max-width: 100%; height: auto;"'
-                
+
             new_suffix = f"{attrs}{extra_attrs}{closing}"
             return f'{prefix}cid:{cid}{new_suffix}'
-        
+
         html_processed = pattern.sub(replacer, html_body)
         return html_processed, cid_to_path
