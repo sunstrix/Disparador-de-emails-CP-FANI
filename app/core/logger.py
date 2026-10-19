@@ -17,6 +17,7 @@ from email.utils import formataddr, formatdate, make_msgid
 from app.config import LOGS_DIR, REPORT_EMAIL
 from app.core.smtp_client import SMTPClient
 
+
 class CampaignLogger:
     def __init__(self):
         # Garante que a pasta de logs exista
@@ -29,7 +30,6 @@ class CampaignLogger:
         
         # Inicializa o arquivo CSV com o cabeçalho
         self._init_csv()
-        
         self.start_time = datetime.now()
 
     def _init_csv(self):
@@ -57,7 +57,6 @@ class CampaignLogger:
             entry.get("status", ""),
             entry.get("erro", "")
         ]
-        
         try:
             with open(self.log_filepath, mode='a', newline='', encoding='utf-8-sig') as f:
                 writer = csv.writer(f, delimiter=';')
@@ -71,7 +70,6 @@ class CampaignLogger:
                     with open(alt_filepath, mode='w', newline='', encoding='utf-8-sig') as f_alt:
                         writer = csv.writer(f_alt, delimiter=';')
                         writer.writerow(headers)
-                
                 with open(alt_filepath, mode='a', newline='', encoding='utf-8-sig') as f_alt:
                     writer = csv.writer(f_alt, delimiter=';')
                     writer.writerow(row)
@@ -86,27 +84,25 @@ class CampaignLogger:
         Este método é seguro para ser chamado de uma thread separada (P0-9).
         """
         end_time = datetime.now()
-        
         subject = f"[CP Fani] Relatório de Disparo - {self.start_time.strftime('%d/%m/%Y %H:%M')}"
-        
         body_text = f"""
-        Olá, TI.
-        
-        O processo de disparo de e-mails foi finalizado (ou interrompido).
-        
-        Resumo:
-        - Início: {summary.get('start_time', 'N/A')}
-        - Fim: {summary.get('end_time', end_time.strftime('%Y-%m-%d %H:%M:%S'))}
-        - Total de contatos: {summary.get('total', 0)}
-        - Enviados com sucesso: {summary.get('sent', 0)}
-        - Falhas: {summary.get('failed', 0)}
-        - Restantes: {summary.get('remaining', 0)}
-        
-        O arquivo de log detalhado está em anexo.
-        
-        Atenciosamente,
-        Disparador de E-mails CP Fani
-        """
+Olá, TI.
+
+O processo de disparo de e-mails foi finalizado (ou interrompido).
+
+Resumo:
+- Início: {summary.get('start_time', 'N/A')}
+- Fim: {summary.get('end_time', end_time.strftime('%Y-%m-%d %H:%M:%S'))}
+- Total de contatos: {summary.get('total', 0)}
+- Enviados com sucesso: {summary.get('sent', 0)}
+- Falhas: {summary.get('failed', 0)}
+- Restantes: {summary.get('remaining', 0)}
+
+O arquivo de log detalhado está em anexo.
+
+Atenciosamente,
+Disparador de E-mails CP Fani
+"""
         
         # Monta a mensagem
         msg = MIMEMultipart()
@@ -127,13 +123,12 @@ class CampaignLogger:
             alt_log = self.log_filepath.replace(".csv", "_alt.csv")
             if os.path.exists(alt_log):
                 target_log = alt_log
-
+        
         if os.path.exists(target_log):
             try:
                 with open(target_log, "rb") as attachment:
                     part = MIMEBase("application", "octet-stream")
                     part.set_payload(attachment.read())
-                
                 encoders.encode_base64(part)
                 part.add_header(
                     "Content-Disposition",
@@ -142,7 +137,7 @@ class CampaignLogger:
                 msg.attach(part)
             except Exception:
                 pass
-            
+        
         # Envia o e-mail usando a conexão reutilizável (P0-4)
         client = None
         try:
@@ -153,14 +148,18 @@ class CampaignLogger:
                 port=smtp_config['port'],
                 security=smtp_config['security']
             )
+            
             # Conecta (reutiliza se já estiver conectado, senão cria nova conexão)
             success, msg_conn = client.connect()
             if not success:
                 return False, f"Falha ao conectar para enviar relatório: {msg_conn}"
             
+            # Verificação de segurança: garante que client.server existe antes de enviar
+            if client.server is None:
+                return False, "Conexão SMTP não estabelecida para envio do relatório."
+            
             # Envia a mensagem
             client.server.send_message(msg)
-            
             return True, "Relatório enviado com sucesso."
         except Exception as e:
             return False, f"Falha ao enviar relatório: {str(e)}"
