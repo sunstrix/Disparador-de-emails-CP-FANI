@@ -3,7 +3,6 @@ chcp 65001 >nul
 setlocal EnableExtensions
 title Disparador de E-mails CP Fani - Executar
 color 0B
-
 cd /d "%~dp0"
 
 :: Configurar diretorio e arquivo de log em LOCALAPPDATA
@@ -65,6 +64,24 @@ if exist "venv\Scripts\pythonw.exe" (
     start "" "venv\Scripts\pythonw.exe" "main.py"
 ) else (
     start "" "venv\Scripts\python.exe" "main.py"
+)
+
+:: 5. Watchdog: Verifica se o pythonw.exe morreu silenciosamente nos primeiros 3 segundos
+timeout /t 3 /nobreak >nul
+tasklist /FI "IMAGENAME eq pythonw.exe" 2>nul | find /I "pythonw.exe" >nul
+if errorlevel 1 (
+    echo [ALERTA] O aplicativo fechou inesperadamente apos o inicio. >> "%LOG_FILE%"
+    echo.
+    echo ============================================================
+    echo   O APLICATIVO FECHOU INESPERADAMENTE
+    echo ============================================================
+    echo O processo em segundo plano encerrou em menos de 3 segundos.
+    echo Tentando executar via terminal para exibir o relatorio de erro:
+    echo.
+    "venv\Scripts\python.exe" "main.py"
+    echo.
+    pause
+    exit /b 1
 )
 
 echo Aplicativo iniciado com sucesso em %TIMESTAMP% >> "%LOG_FILE%"
