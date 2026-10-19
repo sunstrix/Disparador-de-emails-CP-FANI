@@ -6,53 +6,30 @@
 
 import os
 import sys
-import shutil
 
-def resource_path(relative_path: str) -> str:
-    """
-    Obtém o caminho absoluto para o recurso.
-    Funciona tanto em desenvolvimento quanto empacotado com PyInstaller.
-    """
-    try:
-        # PyInstaller cria uma pasta temporária e armazena o caminho em sys._MEIPASS
-        base_path = sys._MEIPASS
-    except Exception:
-        base_path = os.path.abspath(".")
-    return os.path.join(base_path, relative_path)
-
-# Diretório do código
-if getattr(sys, 'frozen', False):
-    CODE_DIR = os.path.dirname(sys.executable)
-else:
-    CODE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-# Modo Desenvolvimento: ativado somente via variável CPFANI_DEV=1 ou presença da pasta .git
-IS_DEV = os.environ.get("CPFANI_DEV") == "1" or os.path.exists(os.path.join(CODE_DIR, ".git"))
-
-# Lógica para DATA_DIR (dados graváveis do usuário: logs, templates, app_state.json)
-# Em ambiente de produção/instalação, armazena SEMPRE em %LOCALAPPDATA%\CPFani
-if IS_DEV:
-    DATA_DIR = CODE_DIR
-else:
-    local_app_data = os.environ.get('LOCALAPPDATA', os.path.expanduser('~/.local/share'))
-    DATA_DIR = os.path.join(local_app_data, 'CPFani')
-
-# ==============================================================================
+# ------------------------------------------------------------------------------
 # 1. LIMITES E SEGURANÇA (ANTI-BLOQUEIO DE SMTP)
-# ==============================================================================
+# ------------------------------------------------------------------------------
 # Limite rígido de e-mails por dia por conta de remetente.
+# O aplicativo bloqueará o botão "Iniciar" e exibirá aviso se este valor for
+# excedido ou se o usuário tentar configurá-lo acima deste teto.
 MAX_DAILY_LIMIT = 200
 
-# Limite padrão sugerido para o campo de entrada na interface.
+# Limite padrão sugerido para o campo de entrada na interface (caso o usuário
+# queira enviar menos para aquecer a conta gradualmente).
 DEFAULT_DAILY_LIMIT = 200
 
 # Intervalo padrão entre envios (em segundos) para evitar bloqueio por spam.
+# O sistema sorteará um valor aleatório entre MIN e MAX a cada e-mail.
 MIN_INTERVAL_SECONDS = 10
 MAX_INTERVAL_SECONDS = 30
 
-# ==============================================================================
+# ------------------------------------------------------------------------------
 # 2. SERVIDORES SMTP SUPORTADOS
-# ==============================================================================
+# ------------------------------------------------------------------------------
+# Dicionário com as configurações dos provedores.
+# Chave: Nome amigável exibido na interface.
+# Valor: Dicionário com host, portas e tipo de segurança.
 SMTP_SERVERS = {
     "Gmail": {
         "host": "smtp.gmail.com",
@@ -72,73 +49,41 @@ SMTP_SERVERS = {
     }
 }
 
-# ==============================================================================
+# ------------------------------------------------------------------------------
 # 3. RELATÓRIO E LOGS
-# ==============================================================================
+# ------------------------------------------------------------------------------
+# E-mail para onde o relatório final (com o CSV de logs em anexo) será enviado
+# automaticamente ao final de cada disparo ou ao parar o processo.
 REPORT_EMAIL = "ti@didier.com.br"
 
-# ==============================================================================
+# ------------------------------------------------------------------------------
 # 4. CAMINHOS DE DIRETÓRIOS E ARQUIVOS
-# ==============================================================================
-# Recursos somente leitura
-LOGO_FILE = resource_path(os.path.join("logo", "logo.png"))
-ICON_FILE = resource_path(os.path.join("ico", "icone.ico"))
-ASSETS_DIR = os.path.dirname(LOGO_FILE)
-VERSION_FILE = resource_path("version.txt")
+# ------------------------------------------------------------------------------
+# Obtém o diretório raiz do projeto (onde este arquivo está dentro de 'app/')
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Dados graváveis (apontam para DATA_DIR em %LOCALAPPDATA%\CPFani)
-LOGS_DIR = os.path.join(DATA_DIR, "logs")
-TEMPLATES_DIR = os.path.join(DATA_DIR, "templates")
-APP_STATE_FILE = os.path.join(DATA_DIR, "app_state.json")
+# Caminhos das pastas principais
+ASSETS_DIR = os.path.join(BASE_DIR, "assets")
+LOGS_DIR = os.path.join(BASE_DIR, "logs")
+TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
 
-def _migrate_old_data():
-    """
-    Migração única: se existirem logs, templates ou app_state.json dentro da pasta de
-    instalação (de versões anteriores), move os arquivos para %LOCALAPPDATA%\CPFani
-    sem sobrescrever o que já existir lá.
-    """
-    if IS_DEV or CODE_DIR == DATA_DIR:
-        return
+# Arquivo de estado persistente (controla o limite diário e o índice de retomada)
+APP_STATE_FILE = os.path.join(BASE_DIR, "app_state.json")
 
-    items_to_migrate = ["logs", "templates", "app_state.json"]
-    for item in items_to_migrate:
-        src = os.path.join(CODE_DIR, item)
-        dst = os.path.join(DATA_DIR, item)
+# Arquivo de logo (usado na interface)
+LOGO_FILE = os.path.join(ASSETS_DIR, "logo.png")
 
-        if not os.path.exists(src):
-            continue
+# Ícone do aplicativo (usado na bandeja e janelas)
+ICON_FILE = os.path.join(ASSETS_DIR, "icon.ico")
 
-        try:
-            os.makedirs(DATA_DIR, exist_ok=True)
-            if os.path.isdir(src):
-                os.makedirs(dst, exist_ok=True)
-                for file_name in os.listdir(src):
-                    src_file = os.path.join(src, file_name)
-                    dst_file = os.path.join(dst, file_name)
-                    if os.path.isfile(src_file) and not os.path.exists(dst_file):
-                        shutil.move(src_file, dst_file)
-                if not os.listdir(src):
-                    os.rmdir(src)
-            elif os.path.isfile(src) and not os.path.exists(dst):
-                shutil.move(src, dst)
-        except Exception:
-            pass
-
-def init_data_dir():
-    """
-    Inicializa a estrutura de diretórios graváveis sob demanda ou no startup,
-    evitando efeitos colaterais de I/O na simples importação do módulo.
-    """
-    _migrate_old_data()
-    os.makedirs(DATA_DIR, exist_ok=True)
-    os.makedirs(LOGS_DIR, exist_ok=True)
-    os.makedirs(TEMPLATES_DIR, exist_ok=True)
-
-# ==============================================================================
+# ------------------------------------------------------------------------------
 # 5. VARIÁVEIS DE SUBSTITUIÇÃO (TEMPLATES)
-# ==============================================================================
+# ------------------------------------------------------------------------------
+# Fallback padrão quando uma variável (ex: {{primeiro_nome}}) não é encontrada
+# ou está vazia na planilha.
 FALLBACK_NOME = "Revendedor(a)"
 
+# Mapeamento de variáveis especiais que não dependem apenas do nome da coluna
 SPECIAL_VARIABLES = {
     "primeiro_nome": "primeiro_nome",
     "nome_completo": "nome_completo",
@@ -146,21 +91,8 @@ SPECIAL_VARIABLES = {
     "codigorevendedor": "codigorevendedor"
 }
 
-# ==============================================================================
+# ------------------------------------------------------------------------------
 # 6. INFORMAÇÕES DA INTERFACE
-# ==============================================================================
+# ------------------------------------------------------------------------------
 APP_TITLE = "Disparador de E-mails CP Fani"
-
-def get_app_version() -> str:
-    """Lê a versão do arquivo version.txt, com suporte a utf-8-sig e fallback '1.0.0'."""
-    try:
-        if os.path.exists(VERSION_FILE):
-            with open(VERSION_FILE, 'r', encoding='utf-8-sig') as f:
-                version = f.read().replace('\ufeff', '').strip()
-                if version:
-                    return version
-    except Exception:
-        pass
-    return "1.0.0"
-
-APP_VERSION = get_app_version()
+APP_VERSION = "1.0.0"
