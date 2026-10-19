@@ -9,6 +9,7 @@ import re
 import unicodedata
 from typing import Dict, List, Tuple, Any
 
+
 def normalize_string(text: str) -> str:
     """Remove acentos e converte para minúsculas para comparação robusta de cabeçalhos."""
     if not isinstance(text, str):
@@ -19,14 +20,16 @@ def normalize_string(text: str) -> str:
         if unicodedata.category(c) != 'Mn'
     )
 
+
 def is_valid_email(email: str) -> bool:
     """Valida o formato básico de um e-mail."""
     if not email or not isinstance(email, str):
         return False
     email = email.strip().lower()
-    # Regex padrão para validação de e-mail
+    # Regex padrão para validação de e-mail (ponto do domínio escapado)
     pattern = r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$'
     return bool(re.match(pattern, email))
+
 
 def auto_detect_columns(df: pd.DataFrame) -> Dict[str, str]:
     """
@@ -39,18 +42,19 @@ def auto_detect_columns(df: pd.DataFrame) -> Dict[str, str]:
         'nome': ['nome', 'nome_completo', 'revendedor', 'nome_revendedor'],
         'email': ['email', 'e-mail', 'mail', 'e_mail', 'email_contato']
     }
-
+    
     # Normaliza os cabeçalhos do DataFrame para busca insensível a acentos/maiúsculas
     normalized_cols = {normalize_string(col): col for col in df.columns}
-
+    
     for target, possible_names in target_mapping.items():
         for name in possible_names:
             norm_name = normalize_string(name)
             if norm_name in normalized_cols:
                 detected[target] = normalized_cols[norm_name]
                 break
-    
+                
     return detected
+
 
 def _clean_cell_value(val: Any) -> str:
     """
@@ -61,15 +65,15 @@ def _clean_cell_value(val: Any) -> str:
         return ""
     
     val_str = str(val).strip()
-    
     if val_str.lower() in ('nan', 'none', 'null', '<na>'):
         return ""
-        
+    
     # Se for um float terminado em .0 (ex: "12345.0"), remove a parte decimal
     if re.match(r'^\d+\.0$', val_str):
         val_str = val_str[:-2]
         
     return val_str
+
 
 def process_contacts(
     df: pd.DataFrame,
@@ -88,14 +92,14 @@ def process_contacts(
         'duplicados': 0,
         'validos': 0
     }
-
+    
     df_clean = df.copy()
     
     # 1. Tratar nulos e forçar conversao limpa para string
     df_clean[col_codigo] = df_clean[col_codigo].apply(_clean_cell_value)
     df_clean[col_nome] = df_clean[col_nome].apply(_clean_cell_value)
     df_clean[col_email] = df_clean[col_email].apply(_clean_cell_value).str.lower()
-
+    
     valid_rows = []
     
     # 2. Classificar e filtrar linha a linha
@@ -113,20 +117,20 @@ def process_contacts(
             continue
             
         valid_rows.append(row)
-
+        
     df_valid = pd.DataFrame(valid_rows)
-
+    
     if df_valid.empty:
         stats['validos'] = 0
         # Retorna DataFrame vazio com as colunas padronizadas para evitar erros na UI
         return pd.DataFrame(columns=['CodigoRevendedor', 'Nome', 'EMail']), stats
-
+        
     # 3. Remover duplicatas baseadas no e-mail (mantendo o primeiro encontrado)
     initial_valid_count = len(df_valid)
     df_valid = df_valid.drop_duplicates(subset=[col_email], keep='first')
     stats['duplicados'] = initial_valid_count - len(df_valid)
     stats['validos'] = len(df_valid)
-
+    
     # 4. Padronizar colunas de saída para o sistema interno
     df_final = pd.DataFrame()
     df_final['CodigoRevendedor'] = df_valid[col_codigo]
@@ -139,8 +143,9 @@ def process_contacts(
             # Normaliza o nome da coluna para ser uma variável segura (ex: "Tel Celular" -> "tel_celular")
             safe_col_name = re.sub(r'[^a-zA-Z0-9_]', '_', col).lower()
             df_final[safe_col_name] = df_valid[col].apply(_clean_cell_value)
-
+            
     return df_final, stats
+
 
 def load_contacts(file_path: str, sheet_name: str = None) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     """
@@ -154,14 +159,13 @@ def load_contacts(file_path: str, sheet_name: str = None) -> Tuple[pd.DataFrame,
         'detected_columns': {},
         'available_sheets': []
     }
-
+    
     try:
         if file_path.lower().endswith('.csv'):
             # P1-3: CSV brasileiro com ";" - usa sep=None e engine='python' para detecção automática
             # Tenta múltiplos encodings comuns no Brasil
             df = None
             encodings = ['utf-8', 'cp1252', 'latin1', 'iso-8859-1']
-            
             for encoding in encodings:
                 try:
                     df = pd.read_csv(
@@ -178,7 +182,7 @@ def load_contacts(file_path: str, sheet_name: str = None) -> Tuple[pd.DataFrame,
                     continue
                 except Exception:
                     continue
-            
+                    
             if df is None or len(df.columns) == 0:
                 result['error_message'] = "Não foi possível ler o arquivo CSV. Verifique o encoding e o formato."
                 return None, result
@@ -200,23 +204,23 @@ def load_contacts(file_path: str, sheet_name: str = None) -> Tuple[pd.DataFrame,
         else:
             result['error_message'] = "Formato de arquivo não suportado. Use .xlsx ou .csv"
             return None, result
-
+            
         # Verificar se o DataFrame está vazio
         if df.empty:
             result['error_message'] = "O arquivo está vazio ou não contém dados válidos."
             return None, result
-
+            
         # Auto-detectar colunas
         result['detected_columns'] = auto_detect_columns(df)
-
+        
         # Verificação de segurança: se não encontrar e-mail, o arquivo é inútil para o disparo
         if 'email' not in result['detected_columns']:
             result['error_message'] = "Não foi possível identificar uma coluna de 'E-mail' no arquivo. Verifique os cabeçalhos."
             return None, result
-
+            
         result['success'] = True
         return df, result
-
+        
     except pd.errors.EmptyDataError:
         result['error_message'] = "O arquivo está vazio."
         return None, result
