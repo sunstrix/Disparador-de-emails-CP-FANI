@@ -18,12 +18,47 @@ echo   LOG INSTALADOR - %TIMESTAMP% >> "%LOG_FILE%"
 echo ============================================================ >> "%LOG_FILE%"
 
 :: ==============================================================================
-:: 1. RESOLVER INSTALL_DIR DINAMICAMENTE (MEUS DOCUMENTOS)
+:: 0. PROTECAO CONTRA AUTO-DESTRUICAO
 :: ==============================================================================
-for /f "delims=" %%i in ('powershell -NoProfile -ExecutionPolicy Bypass -Command "[System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::MyDocuments)"') do set "MY_DOCS=%%i"
+:: Verifica se o script esta sendo executado dentro da pasta de instalacao final
+:: Se sim, aborta para evitar apagar os arquivos do projeto
+for /f "delims=" %%i in ('powershell -NoProfile -Command "[System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::MyDocuments)"') do set "MY_DOCS=%%i"
 if "%MY_DOCS%"=="" set "MY_DOCS=%USERPROFILE%\Documents"
 set "INSTALL_DIR=%MY_DOCS%\Disparador de e-mails"
 
+:: Normaliza os caminhos para comparacao (remove barras finais)
+set "CURRENT_DIR=%CD%"
+if "%CURRENT_DIR:~-1%"=="\" set "CURRENT_DIR=%CURRENT_DIR:~0,-1%"
+if "%INSTALL_DIR:~-1%"=="\" set "INSTALL_DIR=%INSTALL_DIR:~0,-1%"
+
+if /I "%CURRENT_DIR%"=="%INSTALL_DIR%" (
+    echo.
+    echo ============================================================
+    echo   ERRO: OPERACAO BLOQUEADA
+    echo ============================================================
+    echo.
+    echo Este script (instalar.bat) NAO deve ser executado dentro da
+    echo pasta de instalacao final:
+    echo %INSTALL_DIR%
+    echo.
+    echo O instalar.bat e destinado apenas para DESENVOLVIMENTO LOCAL,
+    echo quando voce tem o codigo fonte na pasta raiz do projeto.
+    echo.
+    echo Para USUARIOS FINAIS, utilize apenas o instalar_completo.bat
+    echo que baixa o projeto do GitHub automaticamente.
+    echo.
+    echo Se voce precisa reinstalar, execute o instalar_completo.bat
+    echo a partir da pasta onde ele esta localizado.
+    echo.
+    echo Log: %LOG_FILE%
+    echo.
+    pause
+    exit /b 1
+)
+
+:: ==============================================================================
+:: 1. RESOLVER INSTALL_DIR DINAMICAMENTE (MEUS DOCUMENTOS)
+:: ==============================================================================
 echo "%INSTALL_DIR%" | findstr /I "OneDrive" >nul
 if errorlevel 1 goto :sem_onedrive
 
@@ -59,21 +94,18 @@ echo INSTALL_DIR: %INSTALL_DIR% >> "%LOG_FILE%"
 echo [1/6] Verificando Python 3.12...
 set "PY_CMD="
 
-:: Tentar via Python Launcher (py -3.12)
 py -3.12 --version >nul 2>&1
 if not errorlevel 1 (
     set "PY_CMD=py -3.12"
     goto :python_encontrado
 )
 
-:: Tentar verificar se o 'python' padrao do sistema e a versao 3.12
 python --version 2>&1 | findstr /C:"3.12" >nul
 if not errorlevel 1 (
     set "PY_CMD=python"
     goto :python_encontrado
 )
 
-:: Se Python 3.12 nao for localizado, tenta instalar via winget
 echo Python 3.12 nao encontrado. Tentando instalar via winget...
 winget install --id Python.Python.3.12 -e --scope user --silent --accept-package-agreements --accept-source-agreements >> "%LOG_FILE%" 2>&1
 
