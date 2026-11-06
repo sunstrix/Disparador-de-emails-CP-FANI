@@ -35,3 +35,4 @@ Thumbs.db
 # Permitir pastas vazias de recursos (o .gitkeep dentro delas será versionado)
 !logo/.gitkeep
 !ico/.gitkeep
+Disparador-de-emails-CP-FANI.zip
